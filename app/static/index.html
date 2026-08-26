@@ -1,0 +1,2432 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ERP Local Enterprise</title>
+  <style>
+    :root {
+      --bg: #f3f5f9;
+      --panel: #ffffff;
+      --sidebar: #091b2c;
+      --sidebar-soft: #10283f;
+      --primary: #1e88e5;
+      --primary-2: #0d47a1;
+      --text: #1c2430;
+      --muted: #6b7280;
+      --line: #dfe5ee;
+      --green: #22a06b;
+      --green-soft: #dff7eb;
+      --red: #df4c4c;
+      --red-soft: #fbe2e2;
+      --yellow: #f4d77a;
+      --yellow-soft: #fff4d6;
+      --shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 250px;
+      background: linear-gradient(180deg, var(--sidebar) 0%, #0d2038 100%);
+      color: #eaf2ff;
+      padding: 18px 14px;
+      position: relative;
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 18px;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #5ec9ff, #1b5fbf);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+      position: relative;
+    }
+
+    .brand-mark::before {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.85);
+      clip-path: polygon(0 100%, 16% 100%, 16% 44%, 45% 44%, 45% 0, 100% 0, 100% 100%, 84% 100%, 84% 56%, 55% 56%, 55% 100%, 0 100%);
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-top: 2px;
+    }
+
+    .nav-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      border: none;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.88);
+      padding: 12px 12px;
+      border-radius: 10px;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+
+    .nav-btn:hover,
+    .nav-btn.active {
+      background: rgba(122, 160, 255, 0.12);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+
+    .nav-btn.active {
+      background: linear-gradient(90deg, rgba(66, 123, 255, 0.22), rgba(35, 90, 181, 0.12));
+      color: #ffffff;
+    }
+
+    .nav-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #dfeeff;
+      flex-shrink: 0;
+    }
+
+    .nav-icon svg {
+      width: 12px;
+      height: 12px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      height: 68px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .mobile-menu-toggle {
+      display: none;
+      min-width: 44px;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .topbar-title {
+      font-size: 21px;
+      color: var(--text);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .toolbar-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .avatar {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ffdd6e, #f7a72e);
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 11px;
+    }
+
+    .content {
+      padding: 24px;
+      overflow: auto;
+    }
+
+    .workspace {
+      display: none;
+    }
+
+    .workspace.active {
+      display: block;
+    }
+
+    .alert-box {
+      background: var(--yellow-soft);
+      border: 1px solid #efd98c;
+      color: #7a5f16;
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .alert-box .dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #f5bf3b;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .dashboard-hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      background: linear-gradient(135deg, rgba(22, 101, 223, 0.08), rgba(15, 118, 110, 0.08));
+      border: 1px solid rgba(30, 136, 229, 0.18);
+      border-radius: 18px;
+      padding: 24px 24px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      color: var(--primary-2);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 11px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .dashboard-hero h2 {
+      margin: 0;
+      font-size: clamp(24px, 2.4vw, 34px);
+      letter-spacing: -0.04em;
+      color: var(--text);
+    }
+
+    .dashboard-hero p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .status-pill.success {
+      background: rgba(34, 160, 107, 0.08);
+      color: var(--green);
+      border-color: rgba(34, 160, 107, 0.18);
+    }
+
+    .status-pill.neutral {
+      background: rgba(30, 136, 229, 0.08);
+      color: var(--primary-2);
+      border-color: rgba(30, 136, 229, 0.16);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    .metric-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      min-height: 132px;
+      padding: 18px 18px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -30px -30px auto;
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .metric-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      font-weight: 700;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-value {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: var(--text);
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-meta {
+      font-size: 12px;
+      color: var(--muted);
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-card.green {
+      background: linear-gradient(180deg, #f3fffb, #fff);
+    }
+
+    .metric-card.red {
+      background: linear-gradient(180deg, #fff6f6, #fff);
+    }
+
+    .metric-card.blue {
+      background: linear-gradient(180deg, #f3f8ff, #fff);
+    }
+
+    .metric-card.yellow {
+      background: linear-gradient(180deg, #fffdf4, #fff);
+    }
+
+    .chart-box {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 18px 18px 12px;
+      margin-bottom: 18px;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .range-switch {
+      display: inline-flex;
+      background: #edf4ff;
+      border: 1px solid #dfeaff;
+      border-radius: 999px;
+      padding: 4px;
+      gap: 4px;
+    }
+
+    .range-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      width: auto;
+      font-weight: 700;
+      min-width: 64px;
+    }
+
+    .range-btn.active {
+      background: linear-gradient(180deg, #2b7ef0, #1c69d5);
+      color: #fff;
+      box-shadow: 0 8px 16px rgba(28, 105, 213, 0.18);
+    }
+
+    .legend {
+      display: flex;
+      gap: 18px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      align-items: center;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .legend i {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+    }
+
+    .pie-chart {
+      min-height: 250px;
+      padding: 20px 10px 0;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pie-layout {
+      width: min(100%, 760px);
+      display: grid;
+      grid-template-columns: 190px minmax(300px, 1fr);
+      align-items: center;
+      gap: 30px;
+    }
+
+    .pie {
+      width: 180px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: conic-gradient(#dfe7ef 0 100%);
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(19, 43, 67, 0.06);
+    }
+
+    .pie::after {
+      content: "";
+      position: absolute;
+      inset: 38px;
+      background: var(--panel);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px var(--line);
+    }
+
+    .pie-center {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .pie-center strong {
+      color: var(--text);
+      font-size: 18px;
+      margin-bottom: 2px;
+    }
+
+    .pie-legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 18px;
+      max-height: 190px;
+      overflow-y: auto;
+    }
+
+    .pie-legend-title {
+      grid-column: 1 / -1;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+
+    .pie-legend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pie-legend-item span:first-child {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .pie-legend-item b {
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .pie-legend-item small {
+      color: var(--muted);
+      font-size: 11px;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .pie-swatch {
+      flex: 0 0 10px;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+    }
+
+    .pie-empty {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 680px) {
+      .pie-layout {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        gap: 18px;
+      }
+
+      .pie-legend {
+        width: 100%;
+      }
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .card h3,
+    .card h4 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .table th {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .table tr:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .table td:first-child,
+    .table th:first-child {
+      width: 60px;
+    }
+
+    .table td:last-child,
+    .table th:last-child {
+      text-align: right;
+      width: 110px;
+    }
+
+    .clients-empty {
+      padding: 14px 8px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .tag.success {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.warn {
+      background: var(--yellow-soft);
+      color: #9a7421;
+    }
+
+    .tag.neutral {
+      background: rgba(30, 136, 229, 0.08);
+      color: var(--primary-2);
+    }
+
+    .tag.danger {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .dashboard-card {
+      border-radius: 16px;
+    }
+
+    .dashboard-action {
+      border-radius: 12px;
+      box-shadow: 0 10px 18px rgba(30, 136, 229, 0.18);
+    }
+
+    .panel-head.compact {
+      margin-bottom: 12px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+      gap: 18px;
+    }
+
+    .field {
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 7px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      font-size: 14px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #2b7ef0, #1c69d5);
+      color: #fff;
+      border: none;
+      font-weight: 700;
+      transition: opacity .15s ease;
+    }
+
+    button:hover {
+      opacity: 0.96;
+    }
+
+    .button-second {
+      background: #f0f5ff;
+      color: var(--primary-2);
+      border: 1px solid #dfeaff;
+    }
+
+    .status-box {
+      background: #eef3fb;
+      border: 1px solid #dfe8f7;
+      border-radius: 10px;
+      padding: 10px 12px;
+      min-height: 42px;
+      color: var(--text);
+      font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .status-box.success {
+      background: #eafaf2;
+      border-color: #bfe8d1;
+      color: #165d3b;
+    }
+
+    .status-box.error {
+      background: #fdeaea;
+      border-color: #f1c3c3;
+      color: #8b1f1f;
+    }
+
+    .subpanel {
+      background: #f9fafc;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .settings-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-search-wrap {
+      min-width: 260px;
+      flex: 1;
+      max-width: 420px;
+      position: relative;
+    }
+
+    .settings-search-wrap input {
+      width: 100%;
+      padding-left: 38px;
+    }
+
+    .search-icon {
+      position: absolute;
+      top: 50%;
+      left: 12px;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 15px;
+      pointer-events: none;
+    }
+
+    .settings-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .settings-menu-btn {
+      width: 100%;
+      text-align: left;
+      background: #f3f7ff;
+      border: 1px solid #dfeaff;
+      color: var(--primary-2);
+      font-weight: 700;
+      padding: 11px 12px;
+      border-radius: 10px;
+    }
+
+    .settings-menu-btn.active {
+      background: linear-gradient(180deg, #2b7ef0, #1c69d5);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .settings-guide {
+      background: linear-gradient(180deg, #f9fbff, #f6f9ff);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      min-height: 420px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .guide-panel {
+      display: none;
+    }
+
+    .guide-panel.active {
+      display: block;
+    }
+
+    .guide-panel h4 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      color: var(--text);
+    }
+
+    .guide-panel p {
+      color: var(--muted);
+      margin: 0 0 14px;
+      line-height: 1.5;
+    }
+
+    .guide-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    .guide-list li {
+      margin-bottom: 6px;
+    }
+
+    .guide-tip {
+      margin-top: 14px;
+      background: #fff4d6;
+      border: 1px solid #efd98c;
+      color: #7a5f16;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .row-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        display: block;
+      }
+
+      .sidebar {
+        width: 100%;
+      }
+
+      .dashboard-hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .hero-actions {
+        align-items: flex-start;
+      }
+
+      .metrics-grid {
+        grid-template-columns: repeat(2, minmax(160px, 1fr));
+      }
+
+      .grid-2,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .orders-shell {
+      display: grid;
+      gap: 18px;
+    }
+
+    .order-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .order-tab {
+      white-space: nowrap;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 9px 12px;
+      cursor: pointer;
+    }
+
+    .order-tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .order-tab[data-order-status="PENDING"] {
+      color: #17212b;
+      background: #fff4d6;
+    }
+
+    .order-tab[data-order-status="ACTIVE"] {
+      color: #fff;
+      background: #1769aa;
+    }
+
+    .order-tab[data-order-status="DELIVERED"] {
+      color: #fff;
+      background: #16805b;
+    }
+
+    .order-tab[data-order-status="REJECTED"] {
+      color: #fff;
+      background: #b33a3a;
+    }
+
+    .debt-details {
+      margin-top: 16px;
+    }
+
+    .debt-row {
+      cursor: pointer;
+    }
+
+    .nav-btn[data-view="sales"],
+    .workspace[data-view="sales"] {
+      display: none !important;
+    }
+
+    .nav-btn[hidden] {
+      display: none !important;
+    }
+
+    .order-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .order-row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 13px;
+      background: #fff;
+      display: grid;
+      gap: 9px;
+    }
+
+    .order-row-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .order-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: #eef3f5;
+    }
+
+    .login-screen.hidden {
+      display: none;
+    }
+
+    .login-card {
+      width: min(420px, 100%);
+      background: #fff;
+      padding: 28px;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .login-card h1 {
+      margin-top: 0;
+    }
+
+    .payment-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(9, 27, 44, .45);
+    }
+
+    .payment-modal[hidden] {
+      display: none;
+    }
+
+    .payment-modal-card {
+      width: min(380px, 100%);
+      background: #fff;
+      border-radius: 12px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    #sidebar-backdrop {
+      display: none;
+    }
+
+    .notification-badge {
+      display: inline-flex;
+      min-width: 19px;
+      height: 19px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      margin-left: auto;
+    }
+
+    .user-management {
+      display: grid;
+      gap: 18px;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        overflow-x: hidden;
+      }
+
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 40;
+        width: min(292px, 86vw);
+        overflow-y: auto;
+        transform: translateX(-105%);
+        transition: transform .2s ease;
+        box-shadow: 12px 0 32px rgba(9, 27, 44, .24);
+      }
+
+      body.menu-open .sidebar {
+        transform: translateX(0);
+      }
+
+      #sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 35;
+        display: block;
+        background: rgba(9, 27, 44, .46);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease;
+      }
+
+      body.menu-open #sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .mobile-menu-toggle {
+        display: inline-flex;
+        flex: 0 0 44px;
+        width: 44px;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .topbar {
+        height: auto;
+        min-height: 68px;
+        padding: 12px 14px;
+        align-items: flex-start;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .topbar-title {
+        font-size: 18px;
+      }
+
+      .topbar-right {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+
+      .topbar-right>* {
+        flex: 1 1 auto;
+      }
+
+      .content {
+        padding: 14px;
+      }
+
+      .table-wrap,
+      .table-box,
+      .card:has(> .table) {
+        overflow-x: auto;
+      }
+
+      .table {
+        min-width: 640px;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        min-height: 44px;
+        font-size: 16px;
+      }
+
+      button {
+        min-width: 44px;
+      }
+
+      .order-actions button,
+      .hero-actions button {
+        width: 100%;
+      }
+
+      .order-row-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .login-card {
+        padding: 22px;
+      }
+
+      .payment-modal {
+        padding: 0;
+        align-items: stretch;
+      }
+
+      .payment-modal-card {
+        width: 100%;
+        min-height: 100%;
+        border-radius: 0;
+        padding: 22px 16px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="payment-modal" id="delivery-modal" hidden>
+    <form class="payment-modal-card" id="delivery-form">
+      <h3>Подтвердить вручение</h3>
+      <div class="field"><label for="delivery-payment">Тип оплаты</label><select id="delivery-payment">
+          <option value="CASH">Наличные</option>
+          <option value="BANK">Перевод</option>
+          <option value="DEBT">В долг</option>
+        </select></div>
+      <div class="field"><label for="delivery-paid">Оплачено сейчас</label><input id="delivery-paid" type="number"
+          min="0" step="0.01" value="0" /></div>
+      <div class="status-box" id="delivery-debt-preview">Остаток в долг: 0.00</div>
+      <div class="order-actions"><button type="submit">Доставлено</button><button class="button-second"
+          id="cancel-delivery" type="button">Отмена</button></div>
+      <div class="status-box" id="delivery-status"></div>
+    </form>
+  </div>
+  <section class="login-screen" id="login-screen">
+    <form class="login-card" id="login-form">
+      <div class="eyebrow">ECO KHUSH · ERP</div>
+      <h1>Вход в систему</h1>
+      <div class="field"><label for="login-username">Логин</label><input id="login-username" required
+          autocomplete="username"></div>
+      <div class="field"><label for="login-password">Пароль</label><input id="login-password" type="password" required
+          autocomplete="current-password"></div>
+      <button type="submit">Войти</button>
+      <div class="status-box" id="login-status">Введите логин и пароль.</div>
+    </form>
+  </section>
+  <aside class="sidebar" id="app-sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-title">Поксозаи Точик</div>
+        <div class="brand-sub">Система ERP / Local</div>
+      </div>
+    </div>
+
+    <div class="nav-panel">
+      <button class="nav-btn active" data-view="dashboard">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M4 18V10M10 18V6M16 18V12M22 18V4" />
+          </svg></span>
+        Аналитика
+      </button>
+      <button class="nav-btn" data-view="warehouse">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M3 8.5L12 3l9 5.5M5 10v8.5h14V10M9 14h6" />
+          </svg></span>
+        Склад
+      </button>
+      <button class="nav-btn" data-view="production">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M4 20V9.5L12 4l8 5.5V20M8 20v-5h8v5M8 9h8" />
+          </svg></span>
+        Производство
+      </button>
+      <button class="nav-btn" data-view="formula">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M5 18V7.5A1.5 1.5 0 0 1 6.5 6H19v12M8 10h6M8 14h9" />
+          </svg></span>
+        Формулы
+      </button>
+      <button class="nav-btn" data-view="sales">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M3 6h12v11H3zm14 3h3l2 2v6h-5M7 10h4M7 14h6" />
+          </svg></span>
+        Продажи
+      </button>
+      <button class="nav-btn" data-view="shipments">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M2 8h11v9H2zm12 2h4l3 3v4H14zm-8 3h5" />
+          </svg></span>
+        Отгрузки
+      </button>
+      <button class="nav-btn" data-view="clients">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path
+              d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 8c1-2.2 3.2-3.5 6-3.5s5 1.3 6 3.5M17 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm4 9c-.8-2-2.5-3.2-4.8-3.2" />
+          </svg></span>
+        Клиенты
+      </button>
+      <button class="nav-btn" data-view="orders">
+        <span class="nav-icon">▣</span>
+        Заказы
+        <span class="notification-badge" id="pending-orders-badge" hidden>0</span>
+      </button>
+      <button class="nav-btn" data-view="debts">
+        <span class="nav-icon">₽</span>
+        Должники
+      </button>
+      <button class="nav-btn admin-only" data-view="users">
+        <span class="nav-icon">♙</span>
+        Сотрудники
+      </button>
+      <button class="nav-btn" data-view="finance">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path
+              d="M12 2v20M16.5 6.5A4.5 4.5 0 0 0 12 4a4.5 4.5 0 0 0-4.5 4.5A4.5 4.5 0 0 0 12 13a4.5 4.5 0 0 1 4.5 4.5A4.5 4.5 0 0 1 12 22a4.5 4.5 0 0 1-4.5-4.5" />
+          </svg></span>
+        Финансы
+      </button>
+      <button class="nav-btn" data-view="reports">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M5 18V8M11 18V4M17 18v-7M3 20h18" />
+          </svg></span>
+        Отчеты
+      </button>
+      <button class="nav-btn" data-view="guide">
+        <span class="nav-icon"><svg viewBox="0 0 24 24">
+            <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v16H7.5A2.5 2.5 0 0 0 5 21.5zm0 0V20M8 7h7M8 11h7" />
+          </svg></span>
+        Руководство
+      </button>
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" aria-hidden="true"></div>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-label="Открыть меню"
+          aria-controls="app-sidebar" aria-expanded="false">☰</button>
+        <div class="topbar-title">Аналитика и бизнес-панель</div>
+      </div>
+      <div class="topbar-right">
+        <button class="toolbar-btn" id="refresh-all">Обновить</button>
+        <button class="toolbar-btn" id="export-report">Экспорт</button>
+        <button class="toolbar-btn" id="logout-button" type="button">Выйти</button>
+        <button class="user-pill" id="profile-button" type="button"><span class="avatar">А</span><span
+            id="profile-label">Админ</span></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <section class="workspace active" data-view="dashboard">
+        <div class="dashboard-hero">
+          <div>
+            <div class="eyebrow">Панель мониторинга</div>
+            <h2>Оперативный контроль бизнеса</h2>
+            <p>Продажи, остатки и финансы на основе фактических данных базы.</p>
+          </div>
+          <div class="hero-actions">
+            <div class="status-pill success"><span class="status-dot"></span>Система работает стабильно</div>
+            <div class="status-pill neutral">Обновлено: <span id="dashboard-updated-at">сейчас</span></div>
+          </div>
+        </div>
+
+        <div class="alert-box" id="dashboard-low-stock-alert" hidden>
+          <div style="display:flex; align-items:flex-start; gap:10px;">
+            <span class="dot">!</span>
+            <div>
+              <div id="dashboard-low-stock-title">Низкий остаток</div>
+              <div id="dashboard-low-stock-details" style="font-weight:400; margin-top:4px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card green">
+            <div class="metric-label">Остаток</div>
+            <div class="metric-value" id="metric-stock">0</div>
+            <div class="metric-meta">Товаров на складе</div>
+          </div>
+          <div class="metric-card blue">
+            <div class="metric-label">Выручка</div>
+            <div class="metric-value" id="metric-sales">0</div>
+            <div class="metric-meta">Выручка по проведённым продажам</div>
+          </div>
+          <div class="metric-card yellow">
+            <div class="metric-label">Затраты</div>
+            <div class="metric-value" id="metric-expense">0</div>
+            <div class="metric-meta">Расходы бизнеса</div>
+          </div>
+          <div class="metric-card red">
+            <div class="metric-label">Прибыль</div>
+            <div class="metric-value" id="metric-profit">0</div>
+            <div class="metric-meta">Чистый результат</div>
+          </div>
+          <div class="metric-card blue">
+            <div class="metric-label">Баланс кассы</div>
+            <div class="metric-value" id="metric-cash-balance">0</div>
+            <div class="metric-meta">Приходы минус расходы</div>
+          </div>
+        </div>
+
+        <div class="card dashboard-card">
+          <div class="panel-head compact">
+            <div class="panel-title">Резервная копия данных</div>
+            <span class="tag success">Авто-защита</span>
+          </div>
+          <button id="create-backup" class="dashboard-action" style="max-width:280px; margin-bottom:12px;">Создать и
+            скачать копию</button>
+          <div class="status-box" id="backup-response">В архив войдут база данных и Excel-файл.</div>
+        </div>
+
+        <div class="chart-box">
+          <div class="panel-head">
+            <div class="panel-title">Соотношение доходов и расходов</div>
+            <div class="chart-toolbar">
+              <div class="range-switch">
+                <button type="button" class="range-btn active" data-range="7">7 дн</button>
+                <button type="button" class="range-btn" data-range="30">30 дн</button>
+                <button type="button" class="range-btn" data-range="90">90 дн</button>
+              </div>
+              <div class="legend">
+                <span><i style="background:#2dbf8b"></i>Доход от продаж</span>
+                <span><i style="background:#ef5d5d"></i>Себестоимость</span>
+              </div>
+            </div>
+          </div>
+          <div id="sales-chart" class="pie-chart"></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card dashboard-card">
+            <div class="panel-head compact">
+              <div class="panel-title">Топ продаж</div>
+              <span class="tag neutral">Последние продажи</span>
+            </div>
+            <table class="table" id="top-sales-table"></table>
+          </div>
+          <div class="card dashboard-card">
+            <div class="panel-head compact">
+              <div class="panel-title">Топ клиенты за всё время</div>
+              <span class="tag neutral">По сумме покупок</span>
+            </div>
+            <table class="table" id="top-clients-table"></table>
+          </div>
+          <div class="card dashboard-card">
+            <div class="panel-head compact">
+              <div class="panel-title">Краткий обзор</div>
+              <span class="tag warn">Ключевые KPI</span>
+            </div>
+            <div class="row-stack">
+              <div class="subpanel">
+                <div class="metric-label">Продаж</div>
+                <div class="metric-value" id="summary-sales-count">0</div>
+              </div>
+              <div class="subpanel">
+                <div class="metric-label">Партии</div>
+                <div class="metric-value" id="summary-batches-count">0</div>
+              </div>
+              <div class="subpanel">
+                <div class="metric-label">Низкий остаток</div>
+                <div class="metric-value" id="summary-low-stock">0</div>
+              </div>
+              <div class="status-box" id="dashboard-status">Загрузка...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="warehouse">
+        <div class="card">
+          <h3>Склад и товары</h3>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>Добавить товар</label></div>
+              <div class="field"><label>Код товара</label><input id="new-item-code" placeholder="Например PRD1" /></div>
+              <div class="field"><label>Название</label><input id="new-item-name" placeholder="Например Шампунь" />
+              </div>
+              <div class="field"><label>Тип</label>
+                <select id="new-item-type">
+                  <option value="RAW">Сырье</option>
+                  <option value="SEMI">Полуфабрикат</option>
+                  <option value="FINAL">Готовый продукт</option>
+                  <option value="WASTE">Отходы</option>
+                </select>
+              </div>
+              <div class="field"><label>Единица</label><input id="new-item-unit" placeholder="шт, л" value="шт" /></div>
+              <div class="field"><label>Мин. остаток</label><input id="new-item-min-stock" type="number" min="0"
+                  value="0" /></div>
+              <div class="field"><label>Базовая цена продажи</label><input id="new-item-price" type="number" min="0"
+                  step="0.01" value="0" /></div>
+              <button id="create-item">Создать товар</button>
+            </div>
+            <div>
+              <div class="field"><label>Создать партию</label></div>
+              <div class="field"><label>Товар</label><select id="batch-item-id" class="batch-item-id"></select></div>
+              <div class="field"><label>Склад</label><select id="batch-warehouse-id"
+                  class="batch-warehouse-id"></select></div>
+              <div class="field"><label>Цена партии</label>
+                <div style="display:flex; gap:8px; align-items:center;"><input id="batch-cost" value="0" type="number"
+                    min="0" step="0.01" readonly /><button id="batch-custom-cost" class="button-second" type="button"
+                    style="width:auto; white-space:nowrap;">Своя цена</button></div>
+                <div class="help-text" id="batch-cost-hint">Автоматически из базовой цены продажи.</div>
+              </div>
+              <div class="field"><label>Количество</label><input id="batch-qty" value="10" type="number" min="0"
+                  step="0.01" /></div>
+              <button id="create-batch">Создать партию</button>
+              <div class="status-box" id="batch-response">Данные партии не загружены.</div>
+            </div>
+            <div>
+              <div class="field"><label>Операции склада</label></div>
+              <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px; align-items:start;">
+                <div>
+                  <div class="field"><label>Приход</label></div>
+                  <button id="add-incoming-row" class="button-second">Добавить строку</button>
+                  <div id="incoming-rows"></div>
+                  <button id="apply-incoming" style="margin-top:10px;">Принять приход</button>
+                </div>
+                <div>
+                  <div class="field"><label>Перемещение</label></div>
+                  <button id="add-move-row" class="button-second">Добавить строку</button>
+                  <div id="move-rows"></div>
+                  <button id="apply-move" style="margin-top:10px;">Переместить</button>
+                </div>
+                <div>
+                  <div class="field"><label>Корректировка</label></div>
+                  <button id="add-adjustment-row" class="button-second">Добавить строку</button>
+                  <div id="adjustment-rows"></div>
+                  <button id="apply-adjustment" style="margin-top:10px;">Сохранить корректировку</button>
+                </div>
+              </div>
+              <div class="status-box" id="warehouse-response">Загрузка данных склада...</div>
+              <div class="help-text" style="margin-top:10px; font-size:0.95rem; color:#555;">
+                Приход добавляет товар в партию на выбранном складе. Перемещение перемещает остаток между складами.
+                Корректировка добавляет или уменьшает остаток по факту на выбранном складе. Для списания используйте
+                отрицательное значение.
+                Добавляйте несколько строк, чтобы выполнить несколько операций сразу.
+              </div>
+            </div>
+          </div>
+          <div class="form-grid" style="margin-top:18px; gap: 18px; align-items:flex-end;">
+            <div class="field" style="min-width:240px;">
+              <label>Фильтр по складу</label>
+              <select id="stock-summary-warehouse-filter">
+                <option value="">Все склады</option>
+              </select>
+            </div>
+            <div style="display:flex; gap:12px; align-items:flex-end;">
+              <button id="refresh-stock-summary" class="button-second">Обновить остатки</button>
+              <button id="download-stock-summary" class="button-second">Экспорт остатков</button>
+            </div>
+          </div>
+          <div id="stock-summary-selection" class="status-box" style="margin-top:10px;">Выбрано: Все склады. Позиций: 0.
+          </div>
+          <div class="form-grid" style="margin-top:12px; gap:18px; align-items:flex-end;">
+            <div class="field"><label>История с</label><input id="stock-history-from" type="date" /></div>
+            <div class="field"><label>История по</label><input id="stock-history-to" type="date" /></div>
+            <button id="refresh-stock-history" class="button-second">Обновить историю</button>
+            <button id="download-stock-history" class="button-second">Скачать историю</button>
+          </div>
+
+          <div class="grid-2" style="margin-top:18px; gap: 18px;">
+            <div class="card">
+              <h4>Товары</h4>
+              <table class="table" id="items-table"></table>
+            </div>
+            <div class="card">
+              <h4>Склады</h4>
+              <table class="table" id="warehouses-table"></table>
+            </div>
+          </div>
+          <div class="card" style="margin-top:18px; padding: 14px;">
+            <h4>Текущие остатки</h4>
+            <table class="table" id="stock-summary-table"></table>
+          </div>
+          <details style="margin-top:18px;">
+            <summary>Показать партии</summary>
+            <div class="card" style="margin-top:10px; padding: 14px;">
+              <table class="table" id="batches-table"></table>
+              <div style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+                <button id="batches-prev" class="button-second" type="button">Назад</button>
+                <span id="batches-page-label">Страница 1</span>
+                <button id="batches-next" class="button-second" type="button">Вперёд</button>
+              </div>
+            </div>
+          </details>
+          <details style="margin-top:18px;">
+            <summary>Показать историю движений</summary>
+            <div class="card" style="margin-top:10px; padding: 14px;">
+              <table class="table" id="stock-history-table"></table>
+              <div style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+                <button id="history-prev" class="button-second" type="button">Назад</button>
+                <span id="history-page-label">Страница 1</span>
+                <button id="history-next" class="button-second" type="button">Вперёд</button>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="production">
+        <div class="card">
+          <h3>Производство</h3>
+          <div class="panel-head compact" style="margin: 14px 0 12px;">
+            <div class="panel-title">Новая производственная партия</div>
+            <span class="tag neutral">Проведение списывает сырье FIFO</span>
+          </div>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>№ партии / замеса</label><input id="prod-batch-number"
+                  placeholder="Например П-2026-001" /></div>
+              <div class="field"><label>Формула</label>
+                <select id="prod-bom-select">
+                  <option value="">Загрузка...</option>
+                </select>
+              </div>
+              <div class="field"><label>Выход</label><input id="prod-output-qty" value="5" /></div>
+              <div class="field"><label>Доп. расходы</label><input id="prod-overhead" value="0" /></div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button id="create-production-order" class="button-second" type="button">Создать партию</button>
+                <button id="start-production-order" class="button-second" type="button" disabled>В работу</button>
+                <button id="complete-production-order" type="button" disabled>Завершить и оприходовать</button>
+              </div>
+              <button id="run-production">Запустить</button>
+            </div>
+            <div>
+              <div class="field"><label>Отходы</label>
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                  <button id="add-production-waste" class="button-second">Добавить отход</button>
+                  <div style="font-size:0.9rem; color:#555;">Выберите компонент и количество, система подсчитает их как
+                    карты отходов.</div>
+                </div>
+                <div id="prod-waste-rows"></div>
+              </div>
+            </div>
+          </div>
+          <div id="production-status-track"
+            style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:18px;">
+            <div class="status-pill neutral" data-production-step="PLANNED">1. Запланирована</div>
+            <div class="status-pill neutral" data-production-step="IN_PROGRESS">2. В работе</div>
+            <div class="status-pill neutral" data-production-step="COMPLETED">3. Готова</div>
+          </div>
+          <div class="status-box" id="prod-response" style="margin-top:14px;">Ожидание...</div>
+        </div>
+        <div class="card" style="margin-top:18px;">
+          <div class="panel-head compact">
+            <div class="panel-title">Текущая партия</div><span class="tag neutral" id="production-order-label">Не
+              выбрана</span>
+          </div>
+          <div id="production-order-summary" class="empty-state">Создайте партию, чтобы начать производство.</div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="formula">
+        <div class="card">
+          <h3>Формулы</h3>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>Формула</label><select id="formula-bom-id"></select></div>
+              <button id="load-formula" class="button-second">Загрузить формулу</button>
+              <div class="field"><label>Продукт</label><select id="formula-product-id"></select></div>
+              <div class="field"><label>Название</label><input id="formula-name" placeholder="Например Шампунь гель" />
+              </div>
+              <button id="add-formula-row" class="button-second">Добавить компонент</button>
+              <button id="go-create-component" class="button-second">Создать компонент</button>
+              <button id="create-formula">Сохранить формулу</button>
+              <div style="margin-top:8px; font-size:0.9rem; color:#666;">Подсказка: чтобы создать формулу — выберите
+                продукт, добавьте компоненты, нажмите «Сохранить формулу». После сохранения формула автоматически
+                появится в списке и будет загружена для редактирования.</div>
+              <div class="status-box" id="formula-response" style="margin-top:14px;">Ожидание...</div>
+            </div>
+            <div>
+              <div id="formula-item-rows" class="row-stack"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="sales">
+        <div class="card">
+          <h3>Продажи</h3>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>Контрагент</label><select id="sale-counterparty"></select></div>
+              <div class="field"><label>Оплачено</label><input id="sale-paid" type="number" min="0" step="0.01"
+                  value="0" /></div>
+              <div class="field"><label>Способ оплаты</label>
+                <select id="sale-payment-method">
+                  <option value="CASH">Наличные</option>
+                </select>
+              </div>
+              <button id="run-sale">Оформить продажу</button>
+              <div class="status-box" id="sale-summary" style="margin-top:14px;">Итого: 0</div>
+              <div class="status-box" id="sale-response" style="margin-top:14px;">Ожидание...</div>
+            </div>
+            <div>
+              <button id="add-sale-row" class="button-second">Добавить товар</button>
+              <div id="sale-item-rows" class="row-stack"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="shipments">
+        <div class="card">
+          <h3>Отгрузки</h3>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>Склад</label><select id="ship-warehouse-id" class="ship-warehouse-id"></select>
+              </div>
+              <div class="field"><label>Получатель</label><select id="ship-recipient" class="ship-recipient"></select>
+              </div>
+              <div class="field"><label>Примечание</label><textarea id="ship-note"> </textarea></div>
+              <button id="add-shipment-row" class="button-second">Добавить позицию</button>
+              <div id="ship-item-rows" class="row-stack"></div>
+              <button id="create-shipment">Создать отгрузку</button>
+              <div class="status-box" id="ship-response" style="margin-top:14px;">Ожидание...</div>
+            </div>
+            <div>
+              <div class="field"><label>Поиск отгрузки по получателю</label>
+                <input id="shipment-search" placeholder="Имя получателя" autocomplete="off" />
+              </div>
+              <table class="table" id="shipments-table"></table>
+              <div id="shipments-pagination" style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+                <button id="shipments-prev" class="button-second" type="button">Назад</button>
+                <span id="shipments-page-label">Страница 1</span>
+                <button id="shipments-next" class="button-second" type="button">Вперёд</button>
+              </div>
+              <div class="field" style="margin-top:14px;"><label>ID отгрузки</label><input id="ship-shipment-id"
+                  value="" /></div>
+              <button id="download-invoice">Скачать накладную</button>
+              <button id="refresh-shipments" class="button-second" style="margin-top:8px;">Обновить список</button>
+              <div class="card" id="shipment-details-card" style="margin-top:14px; display:none;">
+                <h4 id="shipment-details-title">Детали отгрузки</h4>
+                <div class="status-box" id="shipment-details-summary"></div>
+                <table class="table" id="shipment-details-items-table"></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="clients">
+        <div class="card">
+          <h3>Клиенты</h3>
+          <div class="form-grid">
+            <div>
+              <div class="field"><label>Имя клиента</label><input id="client-name" placeholder="Магазин №1" /></div>
+              <div class="field"><label>Телефон</label><input id="client-phone" placeholder="+7 900 000-00-01" /></div>
+              <button id="create-client">Добавить клиента</button>
+              <button id="refresh-clients" class="button-second">Обновить список</button>
+              <div class="subpanel admin-only" id="client-payment-panel" style="margin-top:18px;">
+                <h4>Погашение долга</h4>
+                <div class="field"><label>Клиент</label><select id="client-payment-client"></select></div>
+                <div class="field"><label>Сумма оплаты</label><input id="client-payment-amount" type="number" min="0.01"
+                    step="0.01" placeholder="0.00" /></div>
+                <div class="field"><label>Способ оплаты</label><select id="client-payment-method">
+                    <option value="CASH">Наличные</option>
+                    <option value="BANK">Банк</option>
+                    <option value="CARD">Карта</option>
+                    <option value="BANK_TRANSFER">Перевод</option>
+                  </select></div>
+                <div class="field"><label>Комментарий</label><input id="client-payment-description"
+                    value="Погашение долга" maxlength="500" /></div>
+                <button id="repay-client-debt" type="button">Принять оплату</button>
+                <div class="status-box" id="client-payment-status">Оплата уменьшит долг клиента и добавит приход в
+                  кассу.</div>
+              </div>
+              <div class="field" style="margin-top:14px;"><label>Поиск клиента</label>
+                <input id="client-search" placeholder="Имя или телефон" autocomplete="off" />
+              </div>
+              <div class="status-box" id="client-response" style="margin-top:14px;">Ожидание...</div>
+            </div>
+            <div>
+              <table class="table" id="clients-table"></table>
+              <div id="clients-pagination" style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+                <button id="clients-prev" class="button-second" type="button">Назад</button>
+                <span id="clients-page-label">Страница 1</span>
+                <button id="clients-next" class="button-second" type="button">Вперёд</button>
+              </div>
+            </div>
+          </div>
+          <div class="card" id="client-history-card" style="margin-top:18px; display:none;">
+            <h4 id="client-history-title">История клиента</h4>
+            <div class="status-box" id="client-history-summary">Выберите клиента в списке.</div>
+            <h5>Продажи</h5>
+            <table class="table" id="client-sales-history-table"></table>
+            <h5 style="margin-top:16px;">Платежи</h5>
+            <table class="table" id="client-payments-history-table"></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="orders">
+        <div class="orders-shell">
+          <div class="card" id="courier-order-panel">
+            <h3>Новая заявка</h3>
+            <div class="field"><label>Клиент</label><select id="order-client"></select></div>
+            <div id="order-lines" class="row-stack"></div>
+            <div class="status-box" id="order-total-summary">Общая сумма заказа: 0.00 сом</div>
+            <button id="add-order-line" class="button-second" type="button">Добавить товар</button>
+            <button id="create-order" type="button">Создать заявку</button>
+            <div class="status-box" id="order-create-status">Склад проверяется только при доставке.</div>
+          </div>
+          <div class="card">
+            <div class="panel-head compact">
+              <h3>Заказы</h3><button id="refresh-orders" class="button-second" type="button">Обновить</button>
+            </div>
+            <div class="order-tabs" id="order-tabs"></div>
+            <div class="order-list" id="orders-list"></div>
+            <div id="orders-pagination" style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+              <button id="orders-prev" class="button-second" type="button">Назад</button>
+              <span id="orders-page-label">Страница 1</span>
+              <button id="orders-next" class="button-second" type="button">Вперёд</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="debts">
+        <div class="card">
+          <h3>Должники</h3>
+          <div class="field"><label>Поиск по имени или телефону</label><input id="debt-search"
+              placeholder="Имя или номер телефона"></div>
+          <table class="table" id="debts-table"></table>
+          <div class="card debt-details" id="debt-details" style="display:none;">
+            <h4 id="debt-details-title">История долга</h4>
+            <div id="debt-details-summary" class="status-box"></div>
+            <table class="table" id="debt-details-items"></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="users">
+        <div class="user-management">
+          <div class="card">
+            <h3>Новый сотрудник</h3>
+            <div class="form-grid">
+              <div class="field"><label>Логин</label><input id="user-username" autocomplete="off"></div>
+              <div class="field"><label>Пароль</label><input id="user-password" type="password"></div>
+              <div class="field"><label>ФИО</label><input id="user-full-name"></div>
+              <div class="field"><label>Роль</label><select id="user-role">
+                  <option>COURIER</option>
+                  <option>ADMIN</option>
+                  <option>TECHNOLOGIST</option>
+                  <option>AGENT</option>
+                  <option>WORKER</option>
+                </select></div>
+            </div>
+            <fieldset class="field">
+              <legend>Доступные разделы</legend>
+              <div id="user-permissions" class="form-grid">
+                <label><input type="checkbox" value="orders"> Заказы</label>
+                <label><input type="checkbox" value="clients"> Клиенты</label>
+                <label><input type="checkbox" value="shipments"> Отгрузки и транспорт</label>
+                <label><input type="checkbox" value="warehouse"> Склад</label>
+                <label><input type="checkbox" value="production"> Производство</label>
+                <label><input type="checkbox" value="sales"> Продажи</label>
+                <label><input type="checkbox" value="finance"> Финансы</label>
+                <label><input type="checkbox" value="dashboard"> Дашборд</label>
+                <label><input type="checkbox" value="formula"> Формулы</label>
+                <label><input type="checkbox" value="reports"> Отчёты</label>
+                <label><input type="checkbox" value="debts"> Должники</label>
+                <label><input type="checkbox" value="settings"> Настройки</label>
+              </div>
+            </fieldset>
+            <label><input id="user-can-change-status" type="checkbox"> Разрешить курьеру менять
+              статус</label><button id="create-user" type="button">Добавить сотрудника</button>
+            <div class="status-box" id="user-status">Ожидание...</div>
+          </div>
+          <div class="card">
+            <div class="panel-head compact">
+              <h3>Сотрудники</h3><button class="button-second" id="refresh-users" type="button">Обновить</button>
+            </div>
+            <table class="table" id="users-table"></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="finance">
+        <div class="card">
+          <h3>Финансы</h3>
+          <div class="form-grid">
+            <div>
+              <div class="status-box" id="finance-overview">Загрузка...</div>
+              <button id="refresh-finance" style="margin-top:12px;">Обновить</button>
+              <h4 style="margin-top:18px;">Период отчёта</h4>
+              <div class="field"><label>С даты</label><input id="finance-date-from" type="date" /></div>
+              <div class="field"><label>По дату</label><input id="finance-date-to" type="date" /></div>
+              <h4 style="margin-top:18px;">Добавить денежную операцию</h4>
+              <div class="field"><label>Тип операции</label><select id="finance-transaction-type">
+                  <option value="INCOME">Приход денег</option>
+                  <option value="EXPENSE">Расход денег</option>
+                </select></div>
+              <div class="field"><label>Сумма</label><input id="finance-transaction-amount" type="number" min="0.01"
+                  step="0.01" placeholder="0.00" /></div>
+              <div class="field"><label>Способ оплаты</label><select id="finance-payment-method">
+                  <option value="CASH">Наличные</option>
+                </select></div>
+              <div class="field"><label>Контрагент</label><select id="finance-counterparty">
+                  <option value="">Без контрагента</option>
+                </select></div>
+              <div class="field"><label>Комментарий</label><input id="finance-transaction-description"
+                  placeholder="Например оплата аренды" /></div>
+              <button id="add-finance-transaction">Добавить операцию</button>
+              <h4 style="margin-top:18px;">Добавить накладной расход</h4>
+              <div class="field"><label>Категория расхода</label><input id="overhead-category" autocomplete="off"
+                  placeholder="Например аренда" /></div>
+              <div class="field"><label>Сумма расхода</label><input id="overhead-amount" type="number" min="0.01"
+                  step="0.01" placeholder="0.00" /></div>
+              <button id="add-overhead">Добавить расход</button>
+              <h4 style="margin-top:18px;">Выработка и зарплата</h4>
+              <div class="field"><label>Сотрудник</label><select id="payroll-employee">
+                  <option value="">Нет активных сотрудников</option>
+                </select></div>
+              <div class="help-text">Доступны все активные сотрудники: курьеры, доставщики, рабочие, агенты и технологи.
+              </div>
+              <button id="go-create-worker" class="button-second" type="button">Добавить сотрудника</button>
+              <div class="field"><label>Период</label><input id="payroll-period" type="month" /></div>
+              <div class="field"><label>Вид работы</label><input id="payroll-work-type"
+                  placeholder="Розлив / варка / агент" /></div>
+              <div class="field"><label>Выработка</label><input id="payroll-quantity" type="number" min="0.01"
+                  step="0.01" /></div>
+              <div class="field"><label>Сдельная ставка</label><input id="payroll-rate" type="number" min="0.01"
+                  step="0.01" /></div>
+              <div class="field"><label>Бонус</label><input id="payroll-bonus" type="number" min="0" step="0.01"
+                  value="0" /></div>
+              <label style="display:flex; gap:8px; align-items:center; margin:10px 0;"><input id="payroll-has-penalty"
+                  type="checkbox"> Есть штраф</label>
+              <div id="payroll-penalty-fields" hidden>
+                <div class="field"><label>Сумма штрафа</label><input id="payroll-penalty-amount" type="number"
+                    min="0.01" step="0.01" value="0" /></div>
+                <div class="field"><label>Комментарий к штрафу</label><input id="payroll-penalty-comment"
+                    maxlength="500" placeholder="Причина штрафа" /></div>
+              </div>
+              <div class="status-box" id="payroll-preview">Итого: 0.00</div>
+              <button id="add-payroll">Начислить зарплату</button>
+            </div>
+            <div>
+              <h4>Журнал денежных операций</h4>
+              <div class="help-text">Показываются 10 последних операций на странице. Фильтр периода применяется к
+                журналу и показателям.</div>
+              <table class="table" id="finance-transactions-table"></table>
+              <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                <button id="finance-transactions-prev" class="button-second" type="button">Назад</button>
+                <span id="finance-transactions-page-label">Страница 1</span>
+                <button id="finance-transactions-next" class="button-second" type="button">Вперёд</button>
+              </div>
+              <h4 style="margin-top:18px;">Накладные расходы</h4>
+              <div class="help-text">Это расходы предприятия, не являющиеся продажей: аренда, зарплата, транспорт и
+                расходы производства. На странице показывается до 10 записей.</div>
+              <table class="table" id="finance-overheads-table" style="margin-top:18px;"></table>
+              <h4 style="margin-top:18px;">Начисления сотрудникам</h4>
+              <table class="table" id="payroll-table"></table>
+              <h4 style="margin-top:18px;">Штрафы сотрудников</h4>
+              <input id="penalty-search" placeholder="Поиск сотрудника или комментария" />
+              <table class="table" id="penalties-table"></table>
+              <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                <button id="finance-overheads-prev" class="button-second" type="button">Назад</button>
+                <span id="finance-overheads-page-label">Страница 1</span>
+                <button id="finance-overheads-next" class="button-second" type="button">Вперёд</button>
+              </div>
+              <button id="download-finance-export" class="button-second" style="margin-top:14px;">Скачать Excel за
+                выбранный период</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="reports">
+        <div class="card">
+          <h3>Отчеты</h3>
+          <div class="form-grid">
+            <div>
+              <div class="status-box" id="report-summary">Загрузка...</div>
+              <div class="field" style="margin-top:14px;"><label>Отчёт с даты</label><input id="report-date-from"
+                  type="date" /></div>
+              <div class="field"><label>Отчёт по дату</label><input id="report-date-to" type="date" /></div>
+              <button id="refresh-reports" style="margin-top:12px;">Обновить отчет</button>
+              <button id="download-report" class="button-second" style="margin-top:10px;">Скачать Excel за
+                период</button>
+            </div>
+            <div>
+              <table class="table" id="report-summary-table"></table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" data-view="guide">
+        <div class="card">
+          <div class="settings-head">
+            <div>
+              <h3 style="margin: 0 0 6px;">Руководство пользователя</h3>
+              <p style="color: var(--muted); margin: 0;">Полная карта ERP: что это, зачем нужно и как пользоваться
+                каждым разделом без лишних настроек.</p>
+            </div>
+            <div class="settings-search-wrap">
+              <span class="search-icon">⌕</span>
+              <input id="settings-search" type="text" placeholder="Поиск по разделам и инструкциям" />
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin: 18px 0 20px;">
+            <div class="card" style="background: #f9fbff;">
+              <h4>1. Аналитика</h4>
+              <p>Это главная страница, где вы видите остатки, прибыль, расходы и общую картину.</p>
+              <ul class="guide-list">
+                <li>Проверяйте остаток в начале рабочего дня.</li>
+                <li>Смотрите выручку, затраты, прибыль.</li>
+                <li>Нажмите “Создать копию”, если надо сделать бэкап.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>2. Склад</h4>
+              <p>Ведите товары, партии и движения на складе.</p>
+              <ul class="guide-list">
+                <li>Создайте товар.</li>
+                <li>Создайте партию.</li>
+                <li>Добавьте приход или перемещение.</li>
+                <li>Проверяйте остатки.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>3. Производство</h4>
+              <p>Нужно для выпуска продукции на основании формулы.</p>
+              <ul class="guide-list">
+                <li>Выберите формулу.</li>
+                <li>Укажите выход.</li>
+                <li>Проверьте отходы.</li>
+                <li>Запустите производство.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>4. Формулы</h4>
+              <p>Создавайте рецептуры состава продукта.</p>
+              <ul class="guide-list">
+                <li>Выберите продукт.</li>
+                <li>Добавьте компоненты.</li>
+                <li>Укажите расход и отходы.</li>
+                <li>Сохраните формулу.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>5. Продажи</h4>
+              <p>Оформляйте продажу и фиксируйте оплату.</p>
+              <ul class="guide-list">
+                <li>Выберите клиента.</li>
+                <li>Добавьте товар.</li>
+                <li>Укажите цену и количество.</li>
+                <li>Подтвердите продажу.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>6. Отгрузки</h4>
+              <p>Планируйте и фиксируйте отправку покупателю.</p>
+              <ul class="guide-list">
+                <li>Выберите склад.</li>
+                <li>Укажите получателя.</li>
+                <li>Добавьте позиции.</li>
+                <li>Создайте отгрузку.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>7. Клиенты</h4>
+              <p>Ведите историю клиентов, телефон и задолженность.</p>
+              <ul class="guide-list">
+                <li>Добавьте клиента.</li>
+                <li>Используйте поиск.</li>
+                <li>Проверьте историю покупок и долг.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>8. Финансы</h4>
+              <p>Учитывайте деньги, расходы и накладные расходы.</p>
+              <ul class="guide-list">
+                <li>Добавьте приход или расход.</li>
+                <li>Выберите способ оплаты.</li>
+                <li>Смотрите журнал операций.</li>
+              </ul>
+            </div>
+            <div class="card" style="background: #f9fbff;">
+              <h4>9. Отчеты</h4>
+              <p>Проверяйте результат работы за выбранный период.</p>
+              <ul class="guide-list">
+                <li>Выберите период.</li>
+                <li>Смотрите выручку и прибыль.</li>
+                <li>Экспортируйте в Excel.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="guide-tip" style="margin-top: 4px;">Совет: начните с разделов «Аналитика», «Склад» и «Продажи» —
+            это базовый рабочий цикл системы.</div>
+
+          <div class="settings-layout" style="margin-top: 22px;">
+            <div class="settings-menu">
+              <button type="button" class="settings-menu-btn active" data-guide="dashboard"
+                data-keywords="аналитика выручка прибыль остаток новости dashboard">Аналитика</button>
+              <button type="button" class="settings-menu-btn" data-guide="warehouse"
+                data-keywords="склад товары остатки партии приход перемещение">Склад</button>
+              <button type="button" class="settings-menu-btn" data-guide="production"
+                data-keywords="производство формула сырье выпуск отходы">Производство</button>
+              <button type="button" class="settings-menu-btn" data-guide="formula"
+                data-keywords="формула рецепт компоненты состав продукт">Формулы</button>
+              <button type="button" class="settings-menu-btn" data-guide="sales"
+                data-keywords="продажи товар цена оплата клиент касса">Продажи</button>
+              <button type="button" class="settings-menu-btn" data-guide="shipments"
+                data-keywords="отгрузки доставка получатель накладная статус">Отгрузки</button>
+              <button type="button" class="settings-menu-btn" data-guide="clients"
+                data-keywords="клиенты история долг телефон продажи">Клиенты</button>
+              <button type="button" class="settings-menu-btn" data-guide="finance"
+                data-keywords="финансы денежные операции расходы доход платежи">Финансы</button>
+              <button type="button" class="settings-menu-btn" data-guide="payroll"
+                data-keywords="зарплата выработка ставка бонус штраф сотрудник начисление">Зарплата и штрафы</button>
+              <button type="button" class="settings-menu-btn" data-guide="reports"
+                data-keywords="отчеты прибыль период excel скачать">Отчеты</button>
+              <button type="button" class="settings-menu-btn" data-guide="orders"
+                data-keywords="заказы заявка клиент доставка курьер статус">Заказы</button>
+              <button type="button" class="settings-menu-btn" data-guide="debts"
+                data-keywords="должники долг задолженность платежи история">Должники</button>
+              <button type="button" class="settings-menu-btn" data-guide="users"
+                data-keywords="сотрудники пользователи роли пароль доступ">Сотрудники</button>
+              <button type="button" class="settings-menu-btn" data-guide="backup"
+                data-keywords="резервная копия архив база восстановление">Резервная копия</button>
+            </div>
+
+            <div class="settings-guide">
+              <div class="guide-panel active" id="guide-dashboard">
+                <h4>Аналитика</h4>
+                <p>Это главная страница для контроля работы бизнеса. Здесь видно деньги, остатки, число продаж и
+                  предупреждения.</p>
+                <ol class="guide-list">
+                  <li>Откройте раздел «Аналитика» в левом меню.</li>
+                  <li>Посмотрите блоки: Остаток, Выручка, Затраты, Прибыль.</li>
+                  <li>Если внизу есть предупреждение про низкий остаток — проверьте товар на складе.</li>
+                  <li>Нажмите «Создать копию», чтобы сделать резервную копию базы данных.</li>
+                  <li>Используйте кнопку «Обновить» в верхнем меню, чтобы обновить данные.</li>
+                </ol>
+                <div class="guide-tip">Подсказка: эта страница нужна для первого взгляда на состояние бизнеса в начале
+                  рабочего дня.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-warehouse">
+                <h4>Склад</h4>
+                <p>На этой странице вы работаете с товарами, партиями и остатками.</p>
+                <ol class="guide-list">
+                  <li>Сначала создайте товар: укажите код, название, тип, единицу и минимальный остаток.</li>
+                  <li>Далее создайте партию товара: выберите товар, склад, цену закупки и количество.</li>
+                  <li>Для пополнения используйте блок «Приход» и добавьте строки.</li>
+                  <li>Для перемещения между складами — блок «Перемещение».</li>
+                  <li>Внизу можно посмотреть текущие остатки и историю движений по складу.</li>
+                </ol>
+                <div class="guide-tip">Важно: перед продажей убедитесь, что товара хватает на складе.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-production">
+                <h4>Производство</h4>
+                <p>Страница предназначена для запуска продукции по формуле и учёта расхода сырья.</p>
+                <ol class="guide-list">
+                  <li>Выберите формулу из списка.</li>
+                  <li>Укажите количество готовой продукции на выходе.</li>
+                  <li>При необходимости добавьте дополнительные расходы.</li>
+                  <li>Если есть отходы, добавьте строки отходов и выставите количество.</li>
+                  <li>Нажмите «Запустить» и система списывает сырьё и создаёт выпуск продукции.</li>
+                </ol>
+                <div class="guide-tip">Если формулы нет — сначала создайте её на странице «Формулы».</div>
+              </div>
+
+              <div class="guide-panel" id="guide-formula">
+                <h4>Формулы</h4>
+                <p>Эта страница нужна для создания и редактирования рецептур и состава продукции.</p>
+                <ol class="guide-list">
+                  <li>Выберите продукт, который будет выпускаться.</li>
+                  <li>Введите название формулы.</li>
+                  <li>Нажмите «Добавить компонент» и заполните ингредиенты, количество и процент отходов.</li>
+                  <li>После заполнения нажмите «Сохранить формулу».</li>
+                  <li>В дальнейшем формулу можно загрузить и отредактировать заново.</li>
+                </ol>
+                <div class="guide-tip">Формула — это база для производственных операций. Без неё производство нельзя
+                  запускать корректно.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-sales">
+                <h4>Продажи</h4>
+                <p>Страница используется для оформления продаж и фиксации оплаты.</p>
+                <ol class="guide-list">
+                  <li>Выберите контрагента или оставьте без контрагента.</li>
+                  <li>Укажите сумму оплаты и способ оплаты: наличные, карта, банк или перевод.</li>
+                  <li>Нажмите «Добавить товар» и выберите товар из списка.</li>
+                  <li>Укажите количество и цену. Система проверит максимальный остаток по складу.</li>
+                  <li>Проверьте итог и нажмите «Оформить продажу».</li>
+                </ol>
+                <div class="guide-tip">Если количество превышает остаток, система не позволит оформить продажу.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-shipments">
+                <h4>Отгрузки</h4>
+                <p>На этой странице оформляются отправки клиентам и сохраняется история отгрузок.</p>
+                <ol class="guide-list">
+                  <li>Выберите склад, получателя и при необходимости добавьте примечание.</li>
+                  <li>Нажмите «Добавить позицию» и выберите товар, количество и цену.</li>
+                  <li>Проверьте итоговую сумму и нажмите «Создать отгрузку».</li>
+                  <li>Используйте поиск по получателю, чтобы быстро найти нужную отгрузку.</li>
+                  <li>В блоке деталей можно посмотреть состав и статус отгрузки.</li>
+                </ol>
+                <div class="guide-tip">Отгрузка фиксирует факт отправки и помогает контролировать клиентские доставки.
+                </div>
+              </div>
+
+              <div class="guide-panel" id="guide-clients">
+                <h4>Клиенты</h4>
+                <p>Здесь ведётся список клиентов, их долг и история покупок.</p>
+                <ol class="guide-list">
+                  <li>Введите имя и телефон клиента.</li>
+                  <li>Нажмите «Добавить клиента».</li>
+                  <li>Используйте поиск по имени или телефону, чтобы быстро найти клиента.</li>
+                  <li>Кликните по клиенту в таблице, чтобы посмотреть его историю продаж и платежей.</li>
+                </ol>
+                <div class="guide-tip">История клиента помогает видеть задолженность и отслеживать его покупки.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-finance">
+                <h4>Финансы</h4>
+                <p>Раздел нужен для учёта денежных операций, расходов и накладных расходов.</p>
+                <ol class="guide-list">
+                  <li>Установите период отчёта по дате.</li>
+                  <li>Выберите тип операции: приход денег или расход денег.</li>
+                  <li>Укажите сумму, способ оплаты и комментарий.</li>
+                  <li>Нажмите «Добавить операцию».</li>
+                  <li>Для накладных расходов используйте отдельную форму с категорией и суммой.</li>
+                </ol>
+                <div class="guide-tip">Финансы должны быть сверены с реальными продажами и расходами на регулярной
+                  основе.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-reports">
+                <h4>Отчеты</h4>
+                <p>Здесь формируются финансовые и управленческие данные за выбранный период.</p>
+                <ol class="guide-list">
+                  <li>Выберите период с даты и по дату.</li>
+                  <li>Нажмите «Обновить отчет».</li>
+                  <li>Система покажет выручку, себестоимость, накладные расходы и прибыль.</li>
+                  <li>При необходимости экспортируйте результат в Excel.</li>
+                </ol>
+                <div class="guide-tip">Используйте отчеты перед закрытием дня или недели для сверки работы бизнеса.
+                </div>
+              </div>
+
+              <div class="guide-panel" id="guide-payroll">
+                <h4>Зарплата и штрафы</h4>
+                <p>Здесь рассчитывается сдельная зарплата сотрудников и ведётся учёт штрафов.</p>
+                <ol class="guide-list">
+                  <li>Сначала откройте «Сотрудники» и добавьте работника: логин, пароль, ФИО и роль.</li>
+                  <li>Перейдите в «Финансы» и найдите блок «Выработка и зарплата».</li>
+                  <li>Выберите сотрудника и месяц начисления.</li>
+                  <li>Введите вид работы, объём выработки и сдельную ставку. Система рассчитает сумму как выработка ×
+                    ставка.</li>
+                  <li>При необходимости укажите бонус. Поле «Итого» покажет начисление до вычета штрафа.</li>
+                  <li>Чтобы добавить штраф, включите «Есть штраф», укажите сумму и обязательную причину.</li>
+                  <li>Нажмите «Начислить зарплату». Сумма к выплате будет рассчитана с учётом штрафа.</li>
+                  <li>Проверяйте результат в таблицах «Начисления сотрудникам» и «Штрафы сотрудников».</li>
+                </ol>
+                <div class="guide-tip">Пример: 100 единиц × 50 рублей + бонус 1 000 = 6 000 рублей начислено. Штраф 500
+                  рублей: к выплате 5 500 рублей.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-orders">
+                <h4>Заказы</h4>
+                <p>Заказ фиксирует заявку клиента до передачи в доставку и оплаты.</p>
+                <ol class="guide-list">
+                  <li>Выберите клиента и добавьте один или несколько товаров.</li>
+                  <li>Проверьте количество и сохраните заявку кнопкой «Создать заявку».</li>
+                  <li>В списке заказов откройте нужный заказ и проверьте его статус.</li>
+                  <li>Для передачи курьеру назначьте доставку, а при выдаче укажите тип оплаты и сумму.</li>
+                  <li>После завершения проверьте, что статус изменился на «Доставлена».</li>
+                </ol>
+                <div class="guide-tip">Заказ удобен для контроля процесса, а продажа фиксирует списание товара и деньги.
+                </div>
+              </div>
+
+              <div class="guide-panel" id="guide-debts">
+                <h4>Должники</h4>
+                <p>Раздел показывает клиентов с непогашенной задолженностью.</p>
+                <ol class="guide-list">
+                  <li>Найдите клиента по имени или телефону.</li>
+                  <li>Откройте строку клиента, чтобы посмотреть историю долга и покупок.</li>
+                  <li>Сверьте сумму долга с платежами и кассовыми операциями.</li>
+                  <li>Новый платёж внесите через раздел «Финансы» и укажите этого клиента.</li>
+                </ol>
+                <div class="guide-tip">Не удаляйте историю операций: она нужна для сверки расчётов с клиентом.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-users">
+                <h4>Сотрудники</h4>
+                <p>Администратор управляет пользователями, ролями и доступом к системе.</p>
+                <ol class="guide-list">
+                  <li>Создайте пользователя и задайте ему имя, логин и роль.</li>
+                  <li>Передайте сотруднику временный пароль для первого входа.</li>
+                  <li>Отключите учётную запись сотрудника, который больше не работает.</li>
+                  <li>Проверяйте права: административные действия доступны только разрешённым ролям.</li>
+                </ol>
+                <div class="guide-tip">Не передавайте пароль администратора другим сотрудникам.</div>
+              </div>
+
+              <div class="guide-panel" id="guide-backup">
+                <h4>Резервная копия</h4>
+                <p>Резервная копия сохраняет базу данных и Excel-файл для просмотра и анализа.</p>
+                <ol class="guide-list">
+                  <li>На странице «Аналитика» нажмите «Создать и скачать копию».</li>
+                  <li>Дождитесь сообщения об успешном создании архива.</li>
+                  <li>Храните архив отдельно от компьютера с программой.</li>
+                  <li>В Excel используйте русские заголовки столбцов для проверки данных.</li>
+                  <li>Создавайте копию перед массовым изменением товаров, партий и цен.</li>
+                </ol>
+                <div class="guide-tip">Архив нужен для восстановления базы, а Excel предназначен для чтения и
+                  отчётности.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script>
+    const settingsSearch = document.getElementById('settings-search');
+    const settingsButtons = Array.from(document.querySelectorAll('.settings-menu-btn'));
+    const guidePanels = Array.from(document.querySelectorAll('.guide-panel'));
+
+    function activateGuide(guideId) {
+      settingsButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.guide === guideId);
+      });
+      guidePanels.forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `guide-${guideId}`);
+      });
+    }
+
+    settingsButtons.forEach((button) => {
+      button.addEventListener('click', () => activateGuide(button.dataset.guide));
+    });
+
+    if (settingsSearch) {
+      settingsSearch.addEventListener('input', () => {
+        const query = settingsSearch.value.trim().toLowerCase();
+        let matched = false;
+
+        settingsButtons.forEach((button) => {
+          const keywords = (button.dataset.keywords || '').toLowerCase();
+          const visible = !query || keywords.includes(query) || button.textContent.toLowerCase().includes(query);
+          button.style.display = visible ? '' : 'none';
+          if (visible && !matched) {
+            matched = true;
+            activateGuide(button.dataset.guide);
+          }
+        });
+
+        if (!query) {
+          activateGuide(settingsButtons.find((button) => button.classList.contains('active'))?.dataset.guide || 'dashboard');
+          return;
+        }
+
+        if (!matched) {
+          guidePanels.forEach((panel) => panel.classList.remove('active'));
+          const emptyState = document.getElementById('guide-empty');
+          if (!emptyState) {
+            const node = document.createElement('div');
+            node.id = 'guide-empty';
+            node.className = 'guide-panel active';
+            node.innerHTML = `
+              <h4>Ничего не найдено</h4>
+              <p>Проверьте запрос или выберите раздел вручную.</p>
+              <div class="guide-tip">Попробуйте искать по словам: продажи, склад, финансы, формула, остаток, отчёт.</div>
+            `;
+            const container = document.querySelector('.settings-guide');
+            if (container) container.appendChild(node);
+          } else {
+            emptyState.style.display = 'block';
+          }
+        } else {
+          const emptyState = document.getElementById('guide-empty');
+          if (emptyState) {
+            emptyState.remove();
+          }
+        }
+      });
+    }
+  </script>
+</body>
+
+</html>
