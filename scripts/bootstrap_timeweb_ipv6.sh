@@ -4,7 +4,7 @@ set -Eeuo pipefail
 APP_DIR="/root/app"
 REPO_URL="${REPO_URL:-https://github.com/amu354084-ops/ecohush.git}"
 BRANCH="${BRANCH:-main}"
-VPS_IPV6="${VPS_IPV6:-2a03:6f01:1:2::1:80c1}"
+VPS_IPV4="${VPS_IPV4:-}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run this script as root in the Timeweb web console."
@@ -15,6 +15,8 @@ read -r -p "GitHub repository URL (Enter for ecohush): " repo_input
 REPO_URL="${repo_input:-$REPO_URL}"
 read -r -p "Git branch [main]: " branch_input
 BRANCH="${branch_input:-main}"
+read -r -p "VPS public IPv4 (optional): " VPS_IPV4_INPUT
+VPS_IPV4="${VPS_IPV4_INPUT:-$VPS_IPV4}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -75,7 +77,7 @@ SECRET_KEY=$ERP_AUTH_SECRET
 ERP_INITIAL_ADMIN_PASSWORD=$ADMIN_PASSWORD
 ERP_HOST=0.0.0.0
 ERP_SERVER_PORT=1833
-ERP_CORS_ORIGINS=http://[$VPS_IPV6]:1833
+ERP_CORS_ORIGINS=http://localhost:1833,http://127.0.0.1:1833${VPS_IPV4:+,http://$VPS_IPV4:1833}
 BACKUP_DIR=/var/backups/erp
 BACKUP_TIMEZONE=UTC
 BACKUP_HOUR=23
