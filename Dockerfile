@@ -15,7 +15,7 @@ COPY app ./app
 COPY alembic ./alembic
 COPY scripts ./scripts
 COPY config ./config
-COPY pyproject.toml requirements.txt ./
+COPY alembic.ini pyproject.toml requirements.txt ./
 
 EXPOSE 1833
 
