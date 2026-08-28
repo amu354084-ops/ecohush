@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-erp_local}
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.production
+    environment:
+      USE_SQLITE: "0"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-erp_local}
+      ERP_HOST: 0.0.0.0
+      ERP_SERVER_PORT: 1833
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "1833:1833"
+    volumes:
+      - ./backups:/var/backups/erp
+      - ./logs:/var/log/erp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_prod_data:

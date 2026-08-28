@@ -1,0 +1,33 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Local databases and runtime data
+*.db
+*.db-shm
+*.db-wal
+backups/
+logs/
+*.log
+ruff-output.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node and test artifacts
+node_modules/
+playwright-report/
+test-results/
+
+# Build artifacts
+build/
+dist/
+
+# Local certificates
+*.key
+*.crt
