@@ -96,7 +96,7 @@ async def checkout_sale(
     session.add(sale)
     await session.flush()
 
-    for sale_item, batch_detail in zip(sale_items, batch_details):
+    for sale_item, batch_detail in zip(sale_items, batch_details, strict=True):
         sale_item.sale_id = sale.id
         session.add(sale_item)
         for move in batch_detail["moves"]:
@@ -149,7 +149,7 @@ async def repay_client_debt(
     client_id: int,
     amount: Decimal,
     payment_method: PaymentMethod,
-    description: str = "Погашение долга",
+    description: str = "",
 ) -> dict[str, Any]:
     if amount <= 0:
         raise ValueError("Сумма погашения должна быть больше нуля")

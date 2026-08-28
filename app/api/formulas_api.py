@@ -7,11 +7,7 @@ from typing import AsyncGenerator
 
 from app.api.auth_dependencies import require_section
 from app.db import async_session
-<<<<<<< HEAD
 from app.services.formulas import create_formula, delete_formula, update_formula
-=======
-from app.services.formulas import create_formula, update_formula
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 
 class FormulaComponentInput(BaseModel):
@@ -77,9 +73,6 @@ async def update_formula_endpoint(
         )
         await session.commit()
         return {"bom_id": bom.id, "name": bom.name}
-<<<<<<< HEAD
-
-
 @router.delete("/{bom_id}")
 async def delete_formula_endpoint(bom_id: int, session: AsyncSession = session_dependency) -> dict:
     try:
@@ -89,5 +82,3 @@ async def delete_formula_endpoint(bom_id: int, session: AsyncSession = session_d
     except ValueError as exc:
         await session.rollback()
         return {"detail": str(exc)}
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0

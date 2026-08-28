@@ -32,6 +32,8 @@ jobs:
       - name: Backend tests
         env:
           USE_SQLITE: '1'
+          ERP_INITIAL_ADMIN_PASSWORD: admin
+          ERP_DISABLE_INITIAL_PASSWORD_CHANGE: '1'
         run: python -m pytest tests -q
 
   deploy:

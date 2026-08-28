@@ -18,9 +18,9 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 BASE_DIR = Path(__file__).parent
-EXCEL_FILE = BASE_DIR / 'data.xlsx'
-DB_FILE = BASE_DIR / 'data.db'
-BACKUP_DIR = BASE_DIR / 'backups'
+EXCEL_FILE = BASE_DIR / "data.xlsx"
+DB_FILE = BASE_DIR / "data.db"
+BACKUP_DIR = BASE_DIR / "backups"
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
@@ -31,23 +31,23 @@ def ensure_sample_data():
         engine = create_engine(f"sqlite:///{DB_FILE}")
         # Примерные таблицы
         df_users = pd.DataFrame({
-            'id': [1, 2],
-            'name': ['Alice', 'Bob'],
-            'email': ['alice@example.com', 'bob@example.com']
+            "id": [1, 2],
+            "name": ["Alice", "Bob"],
+            "email": ["alice@example.com", "bob@example.com"]
         })
         df_products = pd.DataFrame({
-            'id': [1, 2],
-            'title': ['Widget', 'Gadget'],
-            'price': [9.99, 14.5]
+            "id": [1, 2],
+            "title": ["Widget", "Gadget"],
+            "price": [9.99, 14.5]
         })
-        df_users.to_sql('users', engine, index=False, if_exists='replace')
-        df_products.to_sql('products', engine, index=False, if_exists='replace')
+        df_users.to_sql("users", engine, index=False, if_exists="replace")
+        df_products.to_sql("products", engine, index=False, if_exists="replace")
 
     if not EXCEL_FILE.exists():
         # Экспорт таблиц из БД в Excel
         engine = create_engine(f"sqlite:///{DB_FILE}")
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-            for table in ['users', 'products']:
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            for table in ["users", "products"]:
                 try:
                     df = pd.read_sql_table(table, engine)
                     df.to_excel(writer, sheet_name=table, index=False)
@@ -68,7 +68,7 @@ class ExcelChangeHandler(FileSystemEventHandler):
             return
         print(f"Detected modification of {self.excel_path}. Applying to DB...")
         try:
-            timestamp = time.strftime('%Y%m%d-%H%M%S')
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
             # Резервные копии
             shutil.copy2(self.excel_path, BACKUP_DIR / f"data_{timestamp}.xlsx")
             if self.db_path.exists():
@@ -79,7 +79,7 @@ class ExcelChangeHandler(FileSystemEventHandler):
             for sheet in xl.sheet_names:
                 df = xl.parse(sheet)
                 # В простом прототипе просто заменяем таблицу
-                df.to_sql(sheet, self.engine, index=False, if_exists='replace')
+                df.to_sql(sheet, self.engine, index=False, if_exists="replace")
                 print(f"Applied sheet '{sheet}' -> table '{sheet}' (rows: {len(df)})")
 
             print("Sync completed.")
@@ -101,6 +101,6 @@ def watch_loop():
     observer.join()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ensure_sample_data()
     watch_loop()

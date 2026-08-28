@@ -7,13 +7,12 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_dependencies import require_section
 from app.db import async_session
 from app.models.schema import CashTransaction, CashTransactionType, Counterparty, OverheadExpense, PaymentMethod, PayrollEntry, PayrollPenalty, User
-from app.models.schema import User
 from app.api.auth_dependencies import require_roles
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary

@@ -65,9 +65,6 @@ async def update_formula(
         select(BOMHeader).options(selectinload(BOMHeader.bom_items)).where(BOMHeader.id == bom.id)
     )
     return result.scalar_one()
-<<<<<<< HEAD
-
-
 async def delete_formula(session: AsyncSession, bom_id: int) -> None:
     bom = await session.get(BOMHeader, bom_id)
     if bom is None:
@@ -75,5 +72,3 @@ async def delete_formula(session: AsyncSession, bom_id: int) -> None:
     await session.execute(delete(BOMItem).where(BOMItem.bom_id == bom_id))
     await session.delete(bom)
     await session.flush()
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0

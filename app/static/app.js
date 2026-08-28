@@ -63,13 +63,9 @@ function displayValue(value) {
 
 function showView(view) {
   document.body.classList.remove('menu-open');
-<<<<<<< HEAD
   const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
   mobileMenuToggle?.setAttribute('aria-expanded', 'false');
   mobileMenuToggle?.setAttribute('aria-label', 'Открыть меню');
-=======
-  document.getElementById('mobile-menu-toggle')?.setAttribute('aria-expanded', 'false');
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   state.activeView = view;
   document.querySelectorAll('.workspace').forEach((el) => {
     const isActive = el.getAttribute('data-view') === view;
@@ -620,11 +616,7 @@ async function loadUsers() {
     row.dataset.userId = user.id;
     row.cells[4].textContent = (user.permissions || []).map((permission) => sectionLabels[permission] || permission).join(', ');
     const actionCell = row.insertCell();
-<<<<<<< HEAD
     actionCell.innerHTML = `<div class="user-actions"><button type="button" class="button-second reset-user" data-user-id="${user.id}">Сбросить пароль</button> ${user.is_active ? `<button type="button" class="button-second delete-user" data-user-id="${user.id}">Архивировать</button>` : `<button type="button" class="button-second toggle-user" data-user-id="${user.id}" data-active="false">Активировать</button>`}</div>`;
-=======
-    actionCell.innerHTML = `<button type="button" class="button-second reset-user" data-user-id="${user.id}">Сбросить пароль</button> ${user.is_active ? `<button type="button" class="button-second delete-user" data-user-id="${user.id}">Архивировать</button>` : `<button type="button" class="button-second toggle-user" data-user-id="${user.id}" data-active="false">Активировать</button>`}`;
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   });
   document.querySelectorAll('.reset-user').forEach((button) => button.addEventListener('click', async () => { const password = prompt('Новый пароль:'); if (!password) return; const result = await orderRequest(`/api/v1/users/${button.dataset.userId}/password`, { method: 'POST', body: JSON.stringify({ password }) }); showToast(result.detail || 'Пароль сброшен'); }));
   document.querySelectorAll('.toggle-user').forEach((button) => button.addEventListener('click', async () => { const active = button.dataset.active !== 'true'; const result = await orderRequest(`/api/v1/users/${button.dataset.userId}/state`, { method: 'PATCH', body: JSON.stringify({ is_active: active }) }); if (result.detail) showToast(result.detail); else loadUsers(); }));
@@ -633,13 +625,9 @@ async function loadUsers() {
     const user = (data || []).find((item) => String(item.id) === row.dataset.userId);
     if (!user || user.role === 'ADMIN') return;
     const cell = row.cells[4];
-<<<<<<< HEAD
     const availablePermissions = Object.entries(sectionLabels).filter(([key]) => !['users', 'backup'].includes(key));
     const selectedCount = (user.permissions || []).filter((permission) => sectionLabels[permission]).length;
     cell.innerHTML = `<details class="user-access-menu"><summary>Доступы (${selectedCount})</summary><div class="user-access-list">${availablePermissions.map(([key, label]) => `<label><input type="checkbox" class="user-permission" data-user-id="${user.id}" data-permission="${key}" ${(user.permissions || []).includes(key) ? 'checked' : ''}>${escapeHtml(label)}</label>`).join('')}</div></details>`;
-=======
-    cell.innerHTML = Object.entries(sectionLabels).filter(([key]) => !['users', 'backup'].includes(key)).map(([key, label]) => `<label><input type="checkbox" class="user-permission" data-user-id="${user.id}" data-permission="${key}" ${(user.permissions || []).includes(key) ? 'checked' : ''}>${escapeHtml(label)}</label>`).join(' ');
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   });
   document.querySelectorAll('.user-permission').forEach((checkbox) => checkbox.addEventListener('change', async () => {
     const row = checkbox.closest('tr');
@@ -811,7 +799,6 @@ window.addFormulaRow = function (items, data = {}) {
 async function loadFormulaList() {
   const boms = await fetchJson('/api/v1/inventory/boms');
   window.formulaBoms = Array.isArray(boms) ? boms : [];
-<<<<<<< HEAD
   const list = document.getElementById('formula-list');
   if (list) {
     list.innerHTML = window.formulaBoms.length
@@ -845,8 +832,6 @@ async function loadFormulaList() {
       });
     });
   }
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   const bomSelect = document.getElementById('formula-bom-id');
   if (!bomSelect) return;
   bomSelect.innerHTML = '<option value="">Новая формула</option>';
@@ -1596,14 +1581,10 @@ document.addEventListener('DOMContentLoaded', () => {
     applyRoleUi(user.role, user.permissions || []);
     if (user.must_change_password && !(await requirePasswordChange())) return false;
     const label = document.getElementById('profile-label');
-<<<<<<< HEAD
     const avatar = document.querySelector('#profile-button .avatar');
     const displayName = (user.full_name || user.username || 'Пользователь').trim();
     if (label) label.textContent = displayName;
     if (avatar) avatar.textContent = displayName.charAt(0).toLocaleUpperCase('ru-RU');
-=======
-    if (label) label.textContent = user.role === 'ADMIN' ? 'Админ' : (user.full_name || user.username);
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
     loginScreen?.classList.add('hidden');
     const firstView = user.role === 'ADMIN' ? 'dashboard' : (['orders', 'clients', 'shipments', 'warehouse', 'production', 'sales', 'finance', 'dashboard'].find((view) => (user.permissions || []).includes(view)) || 'orders');
     showView(firstView);
@@ -1647,15 +1628,11 @@ document.addEventListener('DOMContentLoaded', () => {
   mobileMenuToggle?.addEventListener('click', () => {
     const isOpen = document.body.classList.toggle('menu-open');
     mobileMenuToggle.setAttribute('aria-expanded', String(isOpen));
-<<<<<<< HEAD
     mobileMenuToggle.setAttribute('aria-label', isOpen ? 'Закрыть меню' : 'Открыть меню');
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   });
   document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
     document.body.classList.remove('menu-open');
     mobileMenuToggle?.setAttribute('aria-expanded', 'false');
-<<<<<<< HEAD
     mobileMenuToggle?.setAttribute('aria-label', 'Открыть меню');
   });
   document.addEventListener('keydown', (event) => {
@@ -1664,8 +1641,6 @@ document.addEventListener('DOMContentLoaded', () => {
     mobileMenuToggle?.setAttribute('aria-expanded', 'false');
     mobileMenuToggle?.setAttribute('aria-label', 'Открыть меню');
     mobileMenuToggle?.focus();
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
   });
 
   const bindIfExists = (id, handler) => {
@@ -2787,16 +2762,10 @@ document.addEventListener('DOMContentLoaded', () => {
     else showToast(`Роль: ${sessionStorage.getItem('erp_role') || 'не авторизован'}`);
   });
   bindIfExists('export-report', () => {
-<<<<<<< HEAD
     showView('reports');
     return downloadAuthenticated('/api/v1/reports/export_excel', 'erp_report.xlsx');
   });
   bindIfExists('open-reports', () => showView('reports'));
-=======
-    const response = downloadAuthenticated('/api/v1/reports/export_excel', 'erp_report.xlsx');
-    return response;
-  });
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
   window.formatMoney = formatMoney;
   window.loadDashboard = loadDashboard;

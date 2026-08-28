@@ -23,9 +23,9 @@ if not rows:
     print("Empty sheet")
     sys.exit(0)
 
-csv_path = p.with_suffix('.csv')
+csv_path = p.with_suffix(".csv")
 import csv
-with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
+with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
     w = csv.writer(f)
     for r in rows:
         w.writerow(["" if v is None else v for v in r])

@@ -15,7 +15,7 @@ from pydantic import Field
 from decimal import Decimal
 from app.services.inventory import create_batch
 from app.services.localization import display_label
-from app.api.auth_dependencies import current_user, require_roles, require_section
+from app.api.auth_dependencies import require_roles, require_section
 
 
 class CreateBatchRequest(BaseModel):

@@ -77,4 +77,4 @@ def test_create_local_backup_exports_formatted_excel(tmp_path, monkeypatch):
     assert workbook["Позиции заказов"]["E2"].value == "Товар"
     assert workbook["Касса"]["A3"].value == 100
     assert workbook["Касса"].auto_filter.ref == "A2:A3"
-    assert workbook["Должники"]["D2"].number_format == '#,##0.00;[Red]-#,##0.00'
+    assert workbook["Должники"]["D2"].number_format == "#,##0.00;[Red]-#,##0.00"

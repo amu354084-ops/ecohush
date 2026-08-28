@@ -80,7 +80,8 @@ def create_database_backup() -> dict[str, Any]:
         host = parsed.hostname
         port = parsed.port or 5432
         database = parsed.path.lstrip("/")
-        pgpass_line = f"{host}:{port}:{database}:{parsed.username}:{parsed.password.replace('\\', '\\\\').replace(':', '\\:')}\n"
+        escaped_password = parsed.password.replace("\\", "\\\\").replace(":", "\\:")
+        pgpass_line = f"{host}:{port}:{database}:{parsed.username}:{escaped_password}\n"
         pgpass_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".pgpass", delete=False) as pgpass:

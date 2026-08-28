@@ -6,11 +6,8 @@
 
 - Ubuntu/Debian VPS
 - Docker Engine и Docker Compose plugin
-<<<<<<< HEAD
 - DNS-запись домена на IP VPS
-=======
 - Публичный IPv4-адрес VPS (для SSH и первичной проверки)
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 - Production `.env.production`, созданный из локального шаблона
 - SSH-ключ для GitHub Actions
 
@@ -38,11 +35,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
 
-<<<<<<< HEAD
 Приложение доступно на `http://SERVER_IP:1833` до настройки reverse proxy и TLS.
-=======
-Приложение доступно на `http://SERVER_IPV4:1833` до настройки reverse proxy и TLS.
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 ## Миграции PostgreSQL
 

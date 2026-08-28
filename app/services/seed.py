@@ -170,12 +170,9 @@ async def seed_initial_data(session: AsyncSession) -> None:
     await ensure_warehouse(session, WarehouseType.FINISHED, "Готовая продукция", "Склад готовой продукции")
     await ensure_warehouse(session, WarehouseType.SCRAP, "Брак и отходы", "Зона брака и отходов")
 
-<<<<<<< HEAD
     if os.getenv("ERP_SEED_DEMO_DATA") != "1":
         return
 
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
     chem1 = await ensure_item(session, "CHEM1", "Химический компонент 1", ItemType.RAW, "л", 10)
     chem2 = await ensure_item(session, "CHEM2", "Химический компонент 2", ItemType.RAW, "л", 8)
     pack = await ensure_item(session, "PKG1", "Упаковка", ItemType.RAW, "шт", 5)

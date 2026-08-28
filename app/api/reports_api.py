@@ -14,10 +14,7 @@ from app.db import async_session
 from app.models.schema import PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary
-<<<<<<< HEAD
 from app.services.google_sheets import sync_report_sections
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 
 async def get_session() -> AsyncSession:
@@ -29,7 +26,6 @@ session_dependency = Depends(get_session)
 router = APIRouter(dependencies=[Depends(require_section("reports"))])
 
 
-<<<<<<< HEAD
 def _excel_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -158,8 +154,6 @@ async def build_report_sections(
     }
 
 
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 @router.get("/pnl")
 async def pnl_summary(
     date_from: date | None = None,
@@ -183,9 +177,7 @@ async def export_excel(
     date_to: date | None = None,
     session: AsyncSession = session_dependency,
 ) -> Response:
-<<<<<<< HEAD
     sections = await build_report_sections(session, date_from, date_to)
-=======
     sales_rows = []
     sales_stmt = select(Sale).options(
         selectinload(Sale.counterparty),
@@ -291,7 +283,6 @@ async def export_excel(
         "Общий счет компании": float(summary["company_balance"]),
         "Прибыль": float(summary["profit"]),
     }]
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
     # Build Excel with pandas (import lazily to avoid hard dependency at import time)
     try:
@@ -301,17 +292,14 @@ async def export_excel(
 
     with BytesIO() as buf:
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-<<<<<<< HEAD
             for sheet_name, rows in sections.items():
                 pd.DataFrame(rows).to_excel(writer, sheet_name=sheet_name, index=False)
-=======
             pd.DataFrame(sales_rows).to_excel(writer, sheet_name="Продажи", index=False)
             pd.DataFrame(sale_items_rows).to_excel(writer, sheet_name="Состав продаж", index=False)
             pd.DataFrame(overheads_rows).to_excel(writer, sheet_name="Накладные расходы", index=False)
             pd.DataFrame(payroll_rows).to_excel(writer, sheet_name="Зарплата", index=False)
             pd.DataFrame(penalties_rows).to_excel(writer, sheet_name="Штрафы", index=False)
             pd.DataFrame(company_summary).to_excel(writer, sheet_name="Общий счет", index=False)
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
         buf.seek(0)
         headers = {"Content-Disposition": "attachment; filename=erp_report.xlsx"}
         return Response(
@@ -319,7 +307,6 @@ async def export_excel(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers=headers,
         )
-<<<<<<< HEAD
 
 
 @router.post("/google-sheets/sync")
@@ -330,5 +317,3 @@ async def sync_google_sheets(
 ) -> dict[str, Any]:
     sections = await build_report_sections(session, date_from, date_to)
     return await sync_report_sections(sections)
-=======
->>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0

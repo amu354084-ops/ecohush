@@ -1,8 +1,26 @@
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("ERP_INITIAL_ADMIN_PASSWORD", "admin")
+os.environ.setdefault("ERP_DISABLE_INITIAL_PASSWORD_CHANGE", "1")
+os.environ.setdefault(
+    "SQLITE_DB_PATH",
+    str(Path(tempfile.gettempdir()) / f"erp_api_errors_{os.getpid()}.db"),
+)
 
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def app_lifespan():
+    with client:
+        yield
 
 
 def admin_headers():

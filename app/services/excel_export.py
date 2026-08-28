@@ -80,7 +80,7 @@ def _format_sheet(worksheet, header_row: int = 1) -> None:
             if "date" in header or "time" in header:
                 cell.number_format = "yyyy-mm-dd hh:mm"
             elif any(word in header for word in ("amount", "price", "cost", "debt", "balance", "total")):
-                cell.number_format = '#,##0.00;[Red]-#,##0.00'
+                cell.number_format = "#,##0.00;[Red]-#,##0.00"
 
 
 def _write_dataframe(writer: pd.ExcelWriter, dataframe: pd.DataFrame, sheet_name: str) -> None:

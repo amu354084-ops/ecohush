@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_dependencies import require_roles, require_section
+from app.api.auth_dependencies import require_section
 from app.db import async_session
 from app.models.schema import User
-from app.models.schema import CashTransaction, Counterparty, Item, PaymentMethod, Sale, SaleItem, User
+from app.models.schema import CashTransaction, Counterparty, Item, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
 from app.services.sales import repay_client_debt
 
