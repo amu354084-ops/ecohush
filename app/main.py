@@ -35,8 +35,11 @@ from app.api import (
 from app.db import engine, async_session
 from app.services.auth import ensure_env_file
 from app.services.backup import schedule_backups
+<<<<<<< HEAD
 from app.services.google_sheets import schedule_google_sheets
 from app.services.telegram_bot import run_telegram_bot
+=======
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 from app.services.orders import renumber_invoice_numbers
 from app.services.seed import seed_initial_data
 
@@ -287,12 +290,16 @@ async def lifespan(app: FastAPI):
             await renumber_invoice_numbers(session)
             await seed_initial_data(session)
     scheduler = schedule_backups()
+<<<<<<< HEAD
     schedule_google_sheets(scheduler)
     telegram_stop = asyncio.Event()
     telegram_task = asyncio.create_task(run_telegram_bot(telegram_stop))
     yield
     telegram_stop.set()
     await telegram_task
+=======
+    yield
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
     scheduler.shutdown(wait=False)
 
 app.router.lifespan_context = lifespan

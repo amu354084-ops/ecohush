@@ -1,10 +1,19 @@
 from logging.config import fileConfig
+<<<<<<< HEAD
 import asyncio
 import os
 from pathlib import Path
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
+=======
+import os
+from pathlib import Path
+
+from alembic import context
+from sqlalchemy import create_engine, pool
+
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 from app.models.schema import Base
 
 config = context.config
@@ -13,6 +22,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+<<<<<<< HEAD
 def get_url():
     url = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/dbname")
     if "+asyncpg" not in url and "postgresql" in url:
@@ -22,6 +32,20 @@ def get_url():
 def run_migrations_offline() -> None:
     context.configure(
         url=get_url(),
+=======
+
+def database_url() -> str:
+    configured = os.getenv("DATABASE_URL")
+    if configured:
+        return configured.replace("+asyncpg", "").replace("+aiosqlite", "")
+    sqlite_path = Path(os.getenv("SQLITE_DB_PATH", "erp_local.db")).resolve()
+    return f"sqlite:///{sqlite_path}"
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=database_url(),
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -29,6 +53,7 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+<<<<<<< HEAD
 def do_run_migrations(connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
@@ -48,6 +73,16 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
+=======
+
+def run_migrations_online() -> None:
+    connectable = create_engine(database_url(), poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 if context.is_offline_mode():
     run_migrations_offline()

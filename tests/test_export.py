@@ -1,4 +1,5 @@
 import pytest
+<<<<<<< HEAD
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -12,6 +13,12 @@ def test_excel_safe_rows_removes_datetime_timezone():
     rows = _excel_safe_rows([{"Дата": aware_datetime, "Сумма": 10}])
 
     assert rows == [{"Дата": datetime(2026, 8, 27, 15, 30), "Сумма": 10}]
+=======
+from decimal import Decimal
+
+from app.models.schema import CashTransaction, CashTransactionType, OverheadExpense, Sale, SaleItem
+from app.api.reports_api import pnl_summary
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 
 @pytest.mark.asyncio

@@ -11,8 +11,8 @@
 
 ```
 Ваша конфигурация:
-├─ Хостинг: Timeweb VPS
-├─ HTTPS: Самоподписанный сертификат (локальный)
+├─ Хостинг: Timeweb VPS с публичным IPv4
+├─ HTTPS: Let's Encrypt после привязки домена
 ├─ PostgreSQL: Docker контейнер (версия 16)
 ├─ Backup: Timeweb S3 (S3-compatible)
 ├─ Мониторинг: Логи + Telegram Alerts

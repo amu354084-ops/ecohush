@@ -15,7 +15,11 @@ REM Build executable using PyInstaller
 python -m pip install -q --upgrade pip
 python -m pip install -q -r requirements.txt
 python -m pip install -q --upgrade pyinstaller
+<<<<<<< HEAD
 pyinstaller --noconfirm --onefile --name erp_offline --hidden-import aiosqlite --hidden-import gspread --hidden-import google.auth --hidden-import google.oauth2.service_account --add-data "app\static;static" app\main.py
+=======
+pyinstaller --noconfirm --onefile --name erp_offline --hidden-import aiosqlite --add-data "app\static;static" app\main.py
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed with errorlevel %ERRORLEVEL%
     pause

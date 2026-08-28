@@ -20,6 +20,10 @@ COPY alembic.ini pyproject.toml requirements.txt ./
 EXPOSE 1833
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+<<<<<<< HEAD
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/health')"
+=======
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/health', timeout=3)"
+>>>>>>> 79337643694e5ea8d1ab2f5dd562210de6645ad0
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "1833"]
