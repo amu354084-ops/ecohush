@@ -9,6 +9,7 @@ __pycache__/
 .env.*
 !.env.example
 !.env.production.example
+secrets/
 node_modules/
 playwright-report/
 pytest_cache/

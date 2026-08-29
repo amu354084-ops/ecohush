@@ -127,6 +127,9 @@ async def run_telegram_bot(stop_event: asyncio.Event) -> None:
                     await _handle_update(token, chat_id, update)
                 except Exception:
                     logger.exception("Telegram bot update failed")
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, urllib.error.HTTPError) and exc.code == 409:
+                logger.error("Telegram polling conflict: another process is using this bot token")
+                return
             logger.exception("Telegram bot polling failed; retrying")
             await asyncio.sleep(5)

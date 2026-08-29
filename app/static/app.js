@@ -229,7 +229,7 @@ function updateSaleRowLimits(row) {
   if (saleItem) {
     const priceInput = row.querySelector('.sale-unit-price');
     if (priceInput) {
-      priceInput.value = Number(saleItem.price || 0).toFixed(2);
+      priceInput.value = Number(saleItem.sale_price ?? saleItem.price ?? 0).toFixed(2);
       priceInput.readOnly = true;
     }
     qtyInput.max = saleItem.available_qty;
@@ -1325,14 +1325,41 @@ function renderWarehouseTables() {
       { key: 'id', label: 'ID' },
       { key: 'item_name', label: 'Товар' },
       { key: 'warehouse_name', label: 'Склад' },
-      { key: 'purchase_cost', label: 'Цена' },
-      { key: 'purchase_cost', label: 'Цена за ед.' },
+      { key: 'purchase_cost', label: 'Себестоимость' },
+      { key: 'sale_price', label: 'Цена продажи' },
       { key: 'initial_qty', label: 'Начальное' },
       { key: 'remaining_qty', label: 'Остаток' },
       { key: 'created_at', label: 'Создано' },
     ],
     batches
   );
+  document.querySelectorAll('#batches-table tr').forEach((row, index) => {
+    if (index === 0) return;
+    const batch = batches[index - 1];
+    if (!batch) return;
+    const cell = row.insertCell();
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'small-btn';
+    button.textContent = 'Изменить цены';
+    button.addEventListener('click', async () => {
+      const purchaseCost = prompt('Себестоимость партии:', batch.purchase_cost);
+      const salePrice = prompt('Цена продажи партии:', batch.sale_price);
+      if (purchaseCost === null || salePrice === null) return;
+      const result = await fetchJson(`/api/v1/inventory/batches/${batch.id}/prices`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purchase_cost: Number(purchaseCost), sale_price: Number(salePrice) }),
+      });
+      if (result?.detail) {
+        setStatus('warehouse-response', `Ошибка изменения цен: ${result.detail}`, 'error');
+        return;
+      }
+      await loadWarehouseTables();
+      setStatus('warehouse-response', 'Цены партии обновлены.', 'success');
+    });
+    cell.appendChild(button);
+  });
   const stockColumns = [
     { key: 'item_code', label: 'Код' },
     { key: 'item_name', label: 'Товар' },
@@ -1395,13 +1422,14 @@ async function loadWarehouseTables() {
 function syncBatchCost() {
   const itemId = Number(document.getElementById('batch-item-id')?.value || 0);
   const costInput = document.getElementById('batch-cost');
-  const hint = document.getElementById('batch-cost-hint');
-  if (!costInput || !itemId || !Array.isArray(window.inventoryItems)) return;
-  if (costInput.readOnly) {
-    const item = window.inventoryItems.find((entry) => entry.id === itemId);
-    costInput.value = Number(item?.price || 0).toFixed(2);
-    if (hint) hint.textContent = 'Автоматически из базовой цены продажи.';
-  }
+  const salePriceInput = document.getElementById('batch-sale-price');
+  if (!costInput || !salePriceInput || !itemId) return;
+  const item = window.inventoryItems?.find((entry) => entry.id === itemId);
+  const batch = (window.batches || [])
+    .filter((entry) => entry.item_id === itemId)
+    .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)))[0];
+  if (costInput.value === '0') costInput.value = Number(batch?.purchase_cost || 0).toFixed(2);
+  if (salePriceInput.value === '0') salePriceInput.value = Number(batch?.sale_price ?? item?.price ?? 0).toFixed(2);
 }
 
 async function loadCounterpartiesForSales() {
@@ -1521,7 +1549,10 @@ async function loadSaleProducts() {
         const availableQty = batchData
           .filter((batch) => batch.item_id === item.id)
           .reduce((sum, batch) => sum + Number(batch.remaining_qty || 0), 0);
-        return { ...item, available_qty: availableQty };
+        const availableBatches = batchData
+          .filter((batch) => batch.item_id === item.id && Number(batch.remaining_qty || 0) > 0)
+          .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+        return { ...item, sale_price: availableBatches[0]?.sale_price ?? item.price, available_qty: availableQty };
       })
       .filter((item) => item.available_qty > 0);
     setStatus('sale-response', 'Готовая продукция загружена.', 'success');
@@ -1773,11 +1804,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const row = document.createElement('div');
     row.className = 'incoming-row';
     row.innerHTML = `
-      <div class="grid" style="grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px;">
+      <div class="grid" style="grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px;">
         <select class="incoming-item-id"></select>
         <select class="incoming-warehouse-id"></select>
         <input class="incoming-qty" placeholder="Количество" value="5" />
-        <input class="incoming-cost" placeholder="Цена" value="20" />
+        <input class="incoming-cost" placeholder="Себестоимость" value="20" />
+        <input class="incoming-sale-price" placeholder="Цена продажи" value="0" />
         <input class="incoming-comment" placeholder="Комментарий" value="приход" />
       </div>
     `;
@@ -2183,7 +2215,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const type = document.getElementById('new-item-type').value;
       const unit = document.getElementById('new-item-unit').value.trim();
       const minStock = Number(document.getElementById('new-item-min-stock').value);
-      const price = Number(document.getElementById('new-item-price').value || 0);
       if (!code || !name || !type || !unit) {
         setStatus('warehouse-response', 'Заполните код, имя, тип и единицу товара.');
         if (btn) { btn.disabled = false; btn.textContent = oldText; }
@@ -2193,7 +2224,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await fetchJson('/api/v1/inventory/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, name, type, unit, min_stock: minStock, price }),
+        body: JSON.stringify({ code, name, type, unit, min_stock: minStock }),
       });
       if (result?.detail) {
         setStatus('warehouse-response', `Ошибка: ${result.detail}`, 'error');
@@ -2206,7 +2237,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('new-item-name').value = '';
       document.getElementById('new-item-unit').value = 'шт';
       document.getElementById('new-item-min-stock').value = '0';
-      document.getElementById('new-item-price').value = '0';
       window.inventoryItems = window.inventoryItems || [];
       window.inventoryItems.push(result);
       await loadWarehouseTables();
@@ -2226,16 +2256,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const itemId = Number(document.getElementById('batch-item-id').value);
     const warehouseId = Number(document.getElementById('batch-warehouse-id').value);
     const cost = Number(document.getElementById('batch-cost').value);
+    const salePrice = Number(document.getElementById('batch-sale-price').value);
     const qty = Number(document.getElementById('batch-qty').value);
-    if (!itemId || !warehouseId || qty <= 0) {
-      setStatus('batch-response', 'Выберите товар, склад и укажите количество.');
+    if (!itemId || !warehouseId || cost < 0 || salePrice < 0 || qty <= 0) {
+      setStatus('batch-response', 'Выберите товар, склад, себестоимость, цену продажи и количество.');
       return;
     }
     setStatus('batch-response', 'Отправка запроса...');
     const result = await fetchJson('/api/v1/inventory/batches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: itemId, warehouse_id: warehouseId, purchase_cost: cost, qty }),
+      body: JSON.stringify({ item_id: itemId, warehouse_id: warehouseId, purchase_cost: cost, sale_price: salePrice, qty }),
     });
     const node = document.getElementById('batch-response');
     if (result?.detail) {
@@ -2251,17 +2282,6 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus('warehouse-response', 'Данные склада загружены.', 'success');
     }
   });
-  bindIfExists('batch-custom-cost', () => {
-    const input = document.getElementById('batch-cost');
-    const button = document.getElementById('batch-custom-cost');
-    const hint = document.getElementById('batch-cost-hint');
-    if (!input || !button) return;
-    input.readOnly = !input.readOnly;
-    button.textContent = input.readOnly ? 'Своя цена' : 'Авто цена';
-    if (hint) hint.textContent = input.readOnly ? 'Автоматически из базовой цены продажи.' : 'Укажите цену только для этой партии.';
-    if (input.readOnly) syncBatchCost();
-    else input.focus();
-  });
   document.getElementById('batch-item-id')?.addEventListener('change', syncBatchCost);
 
   bindIfExists('apply-incoming', async () => {
@@ -2276,12 +2296,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const warehouseId = Number(row.querySelector('.incoming-warehouse-id').value);
       const qty = Number(row.querySelector('.incoming-qty').value);
       const cost = Number(row.querySelector('.incoming-cost').value);
-      if (!itemId || !warehouseId || qty <= 0) {
+      const salePrice = Number(row.querySelector('.incoming-sale-price').value);
+      if (!itemId || !warehouseId || qty <= 0 || cost < 0 || salePrice < 0) {
         setStatus('warehouse-response', 'Проверьте товар, склад и количество в строках прихода.');
         return;
       }
       const comment = row.querySelector('.incoming-comment').value.trim() || 'Incoming';
-      const payload = { item_id: itemId, warehouse_id: warehouseId, qty, cost, comment };
+      const payload = { item_id: itemId, warehouse_id: warehouseId, qty, cost, sale_price: salePrice, comment };
       results.push(await fetchJson('/api/v1/warehouse/incoming', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

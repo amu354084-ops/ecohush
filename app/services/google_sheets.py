@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,8 @@ def _setting(name: str) -> str | None:
 def _cell_value(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
     return value
 
 

@@ -57,7 +57,7 @@ async def build_pnl_summary(
         penalty_stmt = penalty_stmt.where(PayrollPenalty.period <= date_to.strftime("%Y-%m"))
     penalties = Decimal((await session.execute(penalty_stmt)).scalar() or 0).quantize(Decimal("0.01"))
     net_payroll = payroll - penalties
-    profit = (revenue - cogs - overheads - net_payroll).quantize(Decimal("0.01"))
+    profit = (revenue - cogs - overheads - payroll - penalties).quantize(Decimal("0.01"))
 
     cash_stmt = select(
         func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.INCOME, CashTransaction.amount), else_=0)), 0),

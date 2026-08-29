@@ -1,6 +1,11 @@
 import pytest
+from decimal import Decimal
 
-from app.services.google_sheets import sync_report_sections
+from app.services.google_sheets import _cell_value, sync_report_sections
+
+
+def test_google_sheets_converts_decimal_to_json_number():
+    assert _cell_value(Decimal("12.34")) == 12.34
 
 
 class FakeWorksheet:

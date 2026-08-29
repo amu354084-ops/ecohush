@@ -6,6 +6,7 @@ from io import BytesIO
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
@@ -31,7 +32,7 @@ async def deduct_fifo(
         raise ValueError("Required quantity must be positive")
 
     query = (
-        select(Batch)
+        select(Batch).options(selectinload(Batch.item))
         .where(
             Batch.item_id == item_id,
             Batch.warehouse_id == target_warehouse_id,
@@ -63,6 +64,7 @@ async def deduct_fifo(
                 "batch_id": batch.id,
                 "qty": deduct_qty,
                 "unit_cost": batch.purchase_cost,
+                "unit_price": batch.sale_price if batch.sale_price is not None else batch.item.price,
                 "line_cost": line_cost,
             }
         )
@@ -92,16 +94,24 @@ async def create_batch(
     warehouse_id: int,
     purchase_cost: Decimal,
     qty: Decimal,
+    sale_price: Decimal | None = None,
 ) -> Batch:
     if purchase_cost < 0:
         raise ValueError("Purchase cost must be non-negative")
     if qty <= 0:
         raise ValueError("Batch quantity must be positive")
+    if sale_price is not None and sale_price < 0:
+        raise ValueError("Sale price must be non-negative")
+
+    item = await session.get(Item, item_id)
+    if item is None:
+        raise ValueError("Item not found")
 
     batch = Batch(
         item_id=item_id,
         warehouse_id=warehouse_id,
         purchase_cost=purchase_cost,
+        sale_price=sale_price if sale_price is not None else item.price,
         initial_qty=qty,
         remaining_qty=qty,
     )

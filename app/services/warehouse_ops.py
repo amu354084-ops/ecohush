@@ -18,6 +18,7 @@ async def add_stock(
     cost: Decimal,
     comment: str | None = None,
     txn_type: StockTransactionType = StockTransactionType.INBOUND,
+    sale_price: Decimal | None = None,
 ) -> Batch:
     if qty <= 0:
         raise ValueError("Quantity must be positive")
@@ -27,12 +28,15 @@ async def add_stock(
     item = await session.get(Item, item_id)
     if item is None:
         raise ValueError("Item not found")
-    item.price = cost
+    if sale_price is not None and sale_price < 0:
+        raise ValueError("Sale price must be non-negative")
+    item.price = sale_price if sale_price is not None else cost
 
     batch = Batch(
         item_id=item_id,
         warehouse_id=warehouse_id,
         purchase_cost=cost,
+        sale_price=sale_price if sale_price is not None else item.price,
         initial_qty=qty,
         remaining_qty=qty,
     )
@@ -71,7 +75,12 @@ async def move_stock(
         deduct_qty = min(batch.remaining_qty, remaining)
         batch.remaining_qty -= deduct_qty
         remaining -= deduct_qty
-        moved.append({"batch_id": batch.id, "qty": deduct_qty})
+        moved.append({
+            "batch_id": batch.id,
+            "qty": deduct_qty,
+            "purchase_cost": batch.purchase_cost,
+            "sale_price": batch.sale_price,
+        })
         await create_stock_transaction(
             session,
             batch.id,
@@ -83,21 +92,24 @@ async def move_stock(
     if remaining > 0:
         raise ValueError("Not enough stock to move")
 
-    item = await session.get(Item, item_id)
-    destination_cost = cost if cost is not None else (item.price if item else Decimal(0))
-    destination_batch = await add_stock(
-        session,
-        item_id,
-        to_warehouse_id,
-        qty,
-        destination_cost,
-        comment or "Move in",
-        StockTransactionType.TRANSFER_IN,
-    )
+    destination_batches = []
+    for moved_batch in moved:
+        destination_batches.append(
+            await add_stock(
+                session,
+                item_id,
+                to_warehouse_id,
+                moved_batch["qty"],
+                cost if cost is not None else moved_batch["purchase_cost"],
+                comment or "Move in",
+                StockTransactionType.TRANSFER_IN,
+                moved_batch["sale_price"],
+            )
+        )
     return {
         "item_id": item_id,
         "qty": qty,
         "from_warehouse_id": from_warehouse_id,
         "to_warehouse_id": to_warehouse_id,
-        "destination_batch_id": destination_batch.id,
+        "destination_batch_id": destination_batches[0].id,
     }

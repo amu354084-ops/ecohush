@@ -22,7 +22,13 @@ class CreateBatchRequest(BaseModel):
     item_id: int
     warehouse_id: int
     purchase_cost: Decimal = Field(ge=0)
+    sale_price: Decimal = Field(ge=0)
     qty: Decimal = Field(gt=0)
+
+
+class UpdateBatchPricesRequest(BaseModel):
+    purchase_cost: Decimal = Field(ge=0)
+    sale_price: Decimal = Field(ge=0)
 
 
 class WarehouseResponse(BaseModel):
@@ -60,6 +66,7 @@ class BatchResponse(BaseModel):
     item_id: int
     warehouse_id: int
     purchase_cost: str
+    sale_price: str
     initial_qty: str
     remaining_qty: str
     created_at: str
@@ -207,12 +214,42 @@ async def read_batches(
             item_id=b.item_id,
             warehouse_id=b.warehouse_id,
             purchase_cost=str(b.purchase_cost),
+            sale_price=str(b.sale_price),
             initial_qty=str(b.initial_qty),
             remaining_qty=str(b.remaining_qty),
             created_at=b.created_at.isoformat(),
         )
         for b in batches
     ]
+
+
+@router.patch(
+    "/batches/{batch_id}/prices",
+    response_model=BatchResponse,
+    dependencies=[Depends(require_roles("ADMIN"))],
+)
+async def update_batch_prices(
+    batch_id: int,
+    request: UpdateBatchPricesRequest,
+    session: AsyncSession = session_dependency,
+) -> BatchResponse:
+    batch = await session.get(Batch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Партия не найдена")
+    batch.purchase_cost = request.purchase_cost
+    batch.sale_price = request.sale_price
+    await session.commit()
+    await session.refresh(batch)
+    return BatchResponse(
+        id=batch.id,
+        item_id=batch.item_id,
+        warehouse_id=batch.warehouse_id,
+        purchase_cost=str(batch.purchase_cost),
+        sale_price=str(batch.sale_price),
+        initial_qty=str(batch.initial_qty),
+        remaining_qty=str(batch.remaining_qty),
+        created_at=batch.created_at.isoformat(),
+    )
 
 
 @router.get("/boms", response_model=list[BOMResponse])
@@ -252,12 +289,14 @@ async def create_batch_endpoint(
             warehouse_id=request.warehouse_id,
             purchase_cost=request.purchase_cost,
             qty=request.qty,
+            sale_price=request.sale_price,
         )
     return BatchResponse(
         id=batch.id,
         item_id=batch.item_id,
         warehouse_id=batch.warehouse_id,
         purchase_cost=str(batch.purchase_cost),
+        sale_price=str(batch.sale_price),
         initial_qty=str(batch.initial_qty),
         remaining_qty=str(batch.remaining_qty),
         created_at=batch.created_at.isoformat(),

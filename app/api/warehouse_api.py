@@ -27,6 +27,7 @@ class WarehouseMoveRequest(BaseModel):
     to_warehouse_id: int
     qty: Decimal = Field(gt=0)
     cost: Decimal | None = Field(default=None, ge=0)
+    sale_price: Decimal | None = Field(default=None, ge=0)
     comment: str | None = None
 
 
@@ -58,6 +59,7 @@ async def incoming(request: WarehouseOperationRequest, session: AsyncSession = s
                 request.qty,
                 request.cost,
                 request.comment,
+                sale_price=request.sale_price,
             )
         return {"batch_id": batch.id, "remaining_qty": str(batch.remaining_qty)}
     except ValueError as exc:

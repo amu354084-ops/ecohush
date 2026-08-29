@@ -56,6 +56,14 @@ def _read_query(connection: sqlite3.Connection, query: str) -> pd.DataFrame:
     for column in dataframe.columns:
         if "date" in str(column).lower() or "time" in str(column).lower() or column in {"created_at", "timestamp"}:
             dataframe[column] = pd.to_datetime(dataframe[column], errors="coerce")
+            if isinstance(dataframe[column].dtype, pd.DatetimeTZDtype):
+                dataframe[column] = dataframe[column].dt.tz_localize(None)
+            elif dataframe[column].dtype == object:
+                dataframe[column] = dataframe[column].map(
+                    lambda value: value.replace(tzinfo=None)
+                    if hasattr(value, "tzinfo") and value.tzinfo is not None
+                    else value
+                )
     return dataframe
 
 

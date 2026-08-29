@@ -20,7 +20,7 @@ from app.services.sales import checkout_sale
 class SaleItemInput(BaseModel):
     item_id: int = Field(gt=0)
     qty: Decimal = Field(gt=0)
-    unit_price: Decimal = Field(ge=0)
+    unit_price: Decimal | None = Field(default=None, ge=0)
     discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
 

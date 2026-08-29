@@ -66,7 +66,7 @@ async def test_pnl_separates_accrual_profit_from_cash_balance(session):
     summary = await build_pnl_summary(session)
 
     assert summary["net_payroll"] == Decimal("45.00")
-    assert summary["profit"] == Decimal("5.00")
+    assert summary["profit"] == Decimal("-5.00")
     assert summary["cash_income"] == Decimal("60.00")
     assert summary["cash_expenses"] == Decimal("7.00")
     assert summary["company_balance"] == Decimal("53.00")

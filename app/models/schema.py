@@ -172,6 +172,7 @@ class Batch(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     purchase_cost: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    sale_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal(0))
     initial_qty: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     remaining_qty: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

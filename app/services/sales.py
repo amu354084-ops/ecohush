@@ -39,14 +39,12 @@ async def checkout_sale(
     for item_data in items:
         item_id = int(item_data["item_id"])
         qty = Decimal(item_data["qty"])
-        unit_price = Decimal(item_data["unit_price"])
+        requested_price = item_data.get("unit_price")
         discount_percent = Decimal(item_data.get("discount_percent", 0))
-        if qty <= 0 or unit_price < 0:
-            raise ValueError("Item quantity and price must be positive")
+        if qty <= 0:
+            raise ValueError("Item quantity must be positive")
         if discount_percent < 0 or discount_percent > 100:
             raise ValueError("Discount percent must be between 0 and 100")
-
-        discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
 
         cost, moves = await deduct_fifo(
             session=session,
@@ -56,6 +54,13 @@ async def checkout_sale(
             txn_type=StockTransactionType.SALE,
             comment="Sale checkout",
         )
+        unit_price = sum(
+            (move["qty"] * move["unit_price"] for move in moves),
+            Decimal(0),
+        ) / qty
+        if unit_price == 0 and requested_price is not None:
+            unit_price = Decimal(requested_price)
+        discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
         unit_cost = cost / qty if qty != 0 else Decimal(0)
 
         sale_items.append(

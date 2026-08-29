@@ -7,6 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
   ERP_HOST=0.0.0.0 \
   ERP_SERVER_PORT=1833
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
   pip install --no-cache-dir -r requirements.txt
