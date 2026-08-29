@@ -78,7 +78,8 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
 
         assert summary["sales_count"] == 1
         assert summary["income"] == Decimal("100.00")
-        assert summary["expense"] == Decimal("40.00")
+        assert summary["cogs"] == Decimal("40.00")
+        assert summary["expense"] == Decimal("0.00")
         assert summary["profit"] == Decimal("60.00")
         assert summary["cash_income"] == Decimal("0.00")
         assert summary["cash_expenses"] == Decimal("30.00")

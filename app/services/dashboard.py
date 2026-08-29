@@ -25,7 +25,7 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
 
     pnl = await build_pnl_summary(session)
     income = pnl["revenue"]
-    expense = pnl["cogs"] + pnl["overheads"] + pnl["net_payroll"]
+    expense = pnl["operating_expenses"]
     profit = pnl["profit"]
 
     total_stock_qty = sum((batch.remaining_qty or Decimal("0")) for batch in batches)
@@ -165,6 +165,7 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         "profit": profit,
         "revenue": pnl["revenue"],
         "cogs": pnl["cogs"],
+        "operating_expenses": pnl["operating_expenses"],
         "overheads": pnl["overheads"],
         "payroll": pnl["payroll"],
         "penalties": pnl["penalties"],

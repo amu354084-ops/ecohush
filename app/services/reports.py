@@ -82,6 +82,7 @@ async def build_pnl_summary(
     profit = (revenue - cogs - overheads - payroll - penalties).quantize(Decimal("0.01"))
     gross_profit = (revenue - cogs).quantize(Decimal("0.01"))
     markup = (gross_profit / cogs * Decimal("100")).quantize(Decimal("0.01")) if cogs else Decimal("0.00")
+    operating_expenses = (overheads + payroll + penalties).quantize(Decimal("0.01"))
 
     cash_stmt = select(
         func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.INCOME, CashTransaction.amount), else_=0)), 0),
@@ -102,6 +103,7 @@ async def build_pnl_summary(
         "gross_profit": gross_profit,
         "markup": markup,
         "overheads": overheads,
+        "operating_expenses": operating_expenses,
         "payroll": payroll,
         "penalties": penalties,
         "net_payroll": net_payroll,

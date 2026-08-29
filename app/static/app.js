@@ -1038,23 +1038,27 @@ function renderSalesChart(rangeDays = 7) {
   if (!chart) return;
 
   const { labels, income, expense } = getSalesChartSeries(rangeDays);
+  const revenue = income.reduce((sum, value) => sum + value, 0);
+  const cogs = Math.min(expense.reduce((sum, value) => sum + value, 0), revenue);
+  const operatingExpenses = Math.min(Number(window.dashboardOperatingExpenses || 0), Math.max(0, revenue - cogs));
   const entries = [
-    { label: 'Доход', value: income.reduce((sum, value) => sum + value, 0), color: '#2dbf8b' },
-    { label: 'Расход', value: expense.reduce((sum, value) => sum + value, 0), color: '#ef5d5d' },
+    { label: 'Себестоимость', value: cogs, color: '#ef5d5d' },
+    { label: 'Все расходы', value: operatingExpenses, color: '#f0a83c' },
+    { label: 'Прибыль', value: Math.max(0, revenue - cogs - operatingExpenses), color: '#194b9a' },
   ].filter((entry) => entry.value > 0);
-  const total = entries.reduce((sum, entry) => sum + entry.value, 0);
-  if (!total) {
+  if (!revenue || !entries.length) {
     chart.innerHTML = '<div class="pie-empty">Нет продаж за выбранный период</div>';
     return;
   }
+  const total = entries.reduce((sum, entry) => sum + entry.value, 0);
   let position = 0;
-  const segments = entries.map((entry, index) => {
+  const segments = entries.map((entry) => {
     const end = position + (entry.value / total) * 100;
     const segment = `${entry.color} ${position}% ${end}%`;
     position = end;
     return segment;
   });
-  const legend = entries.map((entry, index) => `
+  const legend = entries.map((entry) => `
     <div class="pie-legend-item">
       <span><i class="pie-swatch" style="background:${entry.color}"></i>${entry.label}</span>
       <b>${formatMoney(entry.value)}</b><small>${((entry.value / total) * 100).toFixed(1)}%</small>
@@ -1063,9 +1067,9 @@ function renderSalesChart(rangeDays = 7) {
   chart.innerHTML = `
     <div class="pie-layout">
       <div class="pie" style="background:conic-gradient(${segments.join(', ')})">
-        <div class="pie-center"><strong>${formatMoney(total)}</strong><span>доход + расход</span></div>
+        <div class="pie-center"><strong>${formatMoney(revenue)}</strong><span>выручка</span></div>
       </div>
-      <div class="pie-legend"><div class="pie-legend-title">Зелёный = доход, красный = расход</div>${legend}</div>
+      <div class="pie-legend"><div class="pie-legend-title">Распределение выручки</div>${legend}</div>
     </div>
   `;
 }
@@ -1100,6 +1104,7 @@ async function loadDashboard() {
   }
   const metricStock = document.getElementById('metric-stock');
   const metricSales = document.getElementById('metric-sales');
+  const metricCogs = document.getElementById('metric-cogs');
   const metricExpense = document.getElementById('metric-expense');
   const metricProfit = document.getElementById('metric-profit');
   const metricCashBalance = document.getElementById('metric-cash-balance');
@@ -1118,6 +1123,7 @@ async function loadDashboard() {
     });
   }
   if (metricSales) metricSales.textContent = formatMoney(data.income ?? 0);
+  if (metricCogs) metricCogs.textContent = formatMoney(data.cogs ?? 0);
   if (metricExpense) metricExpense.textContent = formatMoney(data.expense ?? 0);
   if (metricProfit) metricProfit.textContent = formatMoney(data.profit ?? 0);
   if (metricCashBalance) metricCashBalance.textContent = formatMoney(data.company_balance ?? 0);
@@ -1134,6 +1140,7 @@ async function loadDashboard() {
   }
   const activeRange = Number(document.querySelector('.range-btn.active')?.dataset.range || 7);
   window.dashboardFinance = data.daily_finance || [];
+  window.dashboardOperatingExpenses = Number(data.operating_expenses ?? 0);
   renderSalesChart(activeRange);
   renderTable(
     'top-sales-table',
