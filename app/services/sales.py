@@ -39,7 +39,6 @@ async def checkout_sale(
     for item_data in items:
         item_id = int(item_data["item_id"])
         qty = Decimal(item_data["qty"])
-        requested_price = item_data.get("unit_price")
         discount_percent = Decimal(item_data.get("discount_percent", 0))
         if qty <= 0:
             raise ValueError("Item quantity must be positive")
@@ -58,8 +57,6 @@ async def checkout_sale(
             (move["qty"] * move["unit_price"] for move in moves),
             Decimal(0),
         ) / qty
-        if unit_price == 0 and requested_price is not None:
-            unit_price = Decimal(requested_price)
         discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
         unit_cost = cost / qty if qty != 0 else Decimal(0)
 

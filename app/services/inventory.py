@@ -64,7 +64,7 @@ async def deduct_fifo(
                 "batch_id": batch.id,
                 "qty": deduct_qty,
                 "unit_cost": batch.purchase_cost,
-                "unit_price": batch.sale_price if batch.sale_price is not None else batch.item.price,
+                "unit_price": batch.sale_price,
                 "line_cost": line_cost,
             }
         )

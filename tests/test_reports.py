@@ -34,6 +34,8 @@ async def test_pnl_rows(session):
     summary = await build_pnl_summary(session)
     assert summary["revenue"] == Decimal("200.00")
     assert summary["cogs"] == Decimal("80.00")
+    assert summary["gross_profit"] == Decimal("120.00")
+    assert summary["markup"] == Decimal("150.00")
     assert summary["overheads"] == Decimal("50.00")
     assert summary["profit"] == Decimal("70.00")
 

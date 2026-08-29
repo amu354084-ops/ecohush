@@ -33,6 +33,7 @@ async def test_checkout_sale_reduces_batch():
             warehouse_id=wh.id,
             purchase_cost=Decimal("2.00"),
             qty=Decimal("5"),
+            sale_price=Decimal("10.00"),
         )
 
         result = await checkout_sale(
@@ -72,6 +73,7 @@ async def test_checkout_sale_applies_discount_percent():
             warehouse_id=wh.id,
             purchase_cost=Decimal("2.00"),
             qty=Decimal("5"),
+            sale_price=Decimal("10.00"),
         )
 
         result = await checkout_sale(
@@ -130,7 +132,7 @@ async def test_checkout_sale_rejects_overpayment():
         wh = Warehouse(id=WarehouseType.FINISHED, name="WH4", description="test")
         session.add_all([item, wh])
         await session.flush()
-        batch = await create_batch(session, item.id, wh.id, Decimal("2"), Decimal("1"))
+        batch = await create_batch(session, item.id, wh.id, Decimal("2"), Decimal("1"), Decimal("10"))
         await session.commit()
 
         with pytest.raises(ValueError, match="cannot exceed sale total"):
@@ -200,11 +202,11 @@ async def test_checkout_sale_records_all_fifo_batch_allocations():
         warehouse = Warehouse(id=WarehouseType.FINISHED, name="FIFO Warehouse", description="test")
         session.add_all([item, warehouse])
         await session.flush()
-        first = await create_batch(session, item.id, warehouse.id, Decimal("10"), Decimal("2"))
-        second = await create_batch(session, item.id, warehouse.id, Decimal("20"), Decimal("3"))
+        first = await create_batch(session, item.id, warehouse.id, Decimal("10"), Decimal("2"), Decimal("30"))
+        second = await create_batch(session, item.id, warehouse.id, Decimal("20"), Decimal("3"), Decimal("40"))
         result = await checkout_sale(
             session, None,
-            [{"item_id": item.id, "qty": Decimal("4"), "unit_price": Decimal("30")}],
+            [{"item_id": item.id, "qty": Decimal("4"), "unit_price": Decimal("999")}],
             Decimal("120"), PaymentMethod.CASH,
         )
         allocations = (await session.execute(
@@ -215,5 +217,8 @@ async def test_checkout_sale_records_all_fifo_batch_allocations():
             (first.id, Decimal("2.0000"), Decimal("10.0000")),
             (second.id, Decimal("2.0000"), Decimal("20.0000")),
         ]
+
+        assert result["items"][0]["unit_price"] == Decimal("35.0000")
+        assert result["items"][0]["cost_price"] == Decimal("15.0000")
 
     await engine.dispose()

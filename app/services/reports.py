@@ -4,10 +4,19 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.schema import CashTransaction, CashTransactionType, OverheadExpense, PayrollEntry, PayrollPenalty, Sale, SaleItem
+from app.models.schema import (
+    CashTransaction,
+    CashTransactionType,
+    OverheadExpense,
+    PayrollEntry,
+    PayrollPenalty,
+    Sale,
+    SaleItem,
+    SaleItemBatchAllocation,
+)
 
 
 async def build_pnl_summary(
@@ -24,15 +33,28 @@ async def build_pnl_summary(
     revenue = Decimal(result.scalar() or 0).quantize(Decimal("0.01"))
 
     cogs_stmt = (
-        select(func.coalesce(func.sum(SaleItem.qty * SaleItem.cost_price), 0))
+        select(func.coalesce(func.sum(SaleItemBatchAllocation.qty * SaleItemBatchAllocation.unit_cost), 0))
+        .join(SaleItem, SaleItem.id == SaleItemBatchAllocation.sale_item_id)
         .join(Sale, Sale.id == SaleItem.sale_id)
     )
     if date_from:
         cogs_stmt = cogs_stmt.where(Sale.created_at >= date_from)
     if date_to:
         cogs_stmt = cogs_stmt.where(Sale.created_at <= date_to)
-    result = await session.execute(cogs_stmt)
-    cogs = Decimal(result.scalar() or 0).quantize(Decimal("0.01"))
+    allocated_result = await session.execute(cogs_stmt)
+    allocated_cogs = Decimal(allocated_result.scalar() or 0)
+
+    legacy_cogs_stmt = (
+        select(func.coalesce(func.sum(SaleItem.qty * SaleItem.cost_price), 0))
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(~exists().where(SaleItemBatchAllocation.sale_item_id == SaleItem.id))
+    )
+    if date_from:
+        legacy_cogs_stmt = legacy_cogs_stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        legacy_cogs_stmt = legacy_cogs_stmt.where(Sale.created_at <= date_to)
+    legacy_result = await session.execute(legacy_cogs_stmt)
+    cogs = (allocated_cogs + Decimal(legacy_result.scalar() or 0)).quantize(Decimal("0.01"))
 
     overheads_stmt = select(func.coalesce(func.sum(OverheadExpense.amount), 0))
     if date_from:
@@ -58,6 +80,8 @@ async def build_pnl_summary(
     penalties = Decimal((await session.execute(penalty_stmt)).scalar() or 0).quantize(Decimal("0.01"))
     net_payroll = payroll - penalties
     profit = (revenue - cogs - overheads - payroll - penalties).quantize(Decimal("0.01"))
+    gross_profit = (revenue - cogs).quantize(Decimal("0.01"))
+    markup = (gross_profit / cogs * Decimal("100")).quantize(Decimal("0.01")) if cogs else Decimal("0.00")
 
     cash_stmt = select(
         func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.INCOME, CashTransaction.amount), else_=0)), 0),
@@ -75,6 +99,8 @@ async def build_pnl_summary(
     return {
         "revenue": revenue,
         "cogs": cogs,
+        "gross_profit": gross_profit,
+        "markup": markup,
         "overheads": overheads,
         "payroll": payroll,
         "penalties": penalties,

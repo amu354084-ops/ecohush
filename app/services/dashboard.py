@@ -5,11 +5,11 @@ from typing import Any
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.schema import Batch, Counterparty, Item, ItemType, Sale, SaleItem
+from app.models.schema import Batch, Counterparty, Item, ItemType, Sale, SaleItem, SaleItemBatchAllocation
 from app.services.reports import build_pnl_summary
 
 
@@ -68,29 +68,47 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         str(row.day): Decimal(row.income or 0).quantize(Decimal("0.01"))
         for row in daily_result
     }
-    sales_flow_result = await session.execute(
+    allocation_flow_result = await session.execute(
         select(
             func.date(Sale.created_at).label("day"),
-            func.coalesce(func.sum(Sale.total_amount), 0).label("income"),
             func.coalesce(
                 func.sum(
-                    SaleItem.qty * SaleItem.cost_price
+                    SaleItemBatchAllocation.qty * SaleItemBatchAllocation.unit_cost
                 ),
                 0,
             ).label("expense"),
         )
-        .outerjoin(SaleItem, SaleItem.sale_id == Sale.id)
+        .join(SaleItem, SaleItem.sale_id == Sale.id)
+        .join(SaleItemBatchAllocation, SaleItemBatchAllocation.sale_item_id == SaleItem.id)
         .where(Sale.created_at >= datetime.combine(chart_start, datetime.min.time(), tzinfo=timezone.utc))
         .group_by(func.date(Sale.created_at))
         .order_by(func.date(Sale.created_at))
     )
+    daily_cogs = {str(row.day): Decimal(row.expense or 0) for row in allocation_flow_result}
+    legacy_flow_result = await session.execute(
+        select(
+            func.date(Sale.created_at).label("day"),
+            func.coalesce(func.sum(SaleItem.qty * SaleItem.cost_price), 0).label("expense"),
+        )
+        .join(SaleItem, SaleItem.sale_id == Sale.id)
+        .where(
+            Sale.created_at >= datetime.combine(chart_start, datetime.min.time(), tzinfo=timezone.utc),
+            ~exists().where(SaleItemBatchAllocation.sale_item_id == SaleItem.id),
+        )
+        .group_by(func.date(Sale.created_at))
+    )
+    for row in legacy_flow_result:
+        day = str(row.day)
+        daily_cogs[day] = daily_cogs.get(day, Decimal(0)) + Decimal(row.expense or 0)
     daily_sales_flow = {
-        str(row.day): {
-            "income": Decimal(row.income or 0).quantize(Decimal("0.01")),
-            "expense": Decimal(row.expense or 0).quantize(Decimal("0.01")),
+        day: {
+            "income": daily_sales.get(day, Decimal(0)),
+            "expense": expense.quantize(Decimal("0.01")),
         }
-        for row in sales_flow_result
+        for day, expense in daily_cogs.items()
     }
+    for day, income in daily_sales.items():
+        daily_sales_flow.setdefault(day, {"income": income, "expense": Decimal("0.00")})
     recent_result = await session.execute(
         select(Sale)
         .options(selectinload(Sale.counterparty))

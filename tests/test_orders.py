@@ -35,7 +35,9 @@ async def test_order_delivers_and_posts_fifo_debt_only_at_delivery():
         warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
         session.add_all([courier, client, item, warehouse])
         await session.flush()
-        batch = await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("3"))
+        batch = await create_batch(
+            session, item.id, warehouse.id, Decimal("2"), Decimal("3"), Decimal("10")
+        )
 
         order = await create_order(
             session,
