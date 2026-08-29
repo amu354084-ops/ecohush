@@ -166,6 +166,11 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         "revenue": pnl["revenue"],
         "cogs": pnl["cogs"],
         "operating_expenses": pnl["operating_expenses"],
+        "expense_breakdown": {
+            "overheads": pnl["overheads"],
+            "payroll": pnl["payroll"],
+            "penalties": pnl["penalties"],
+        },
         "overheads": pnl["overheads"],
         "payroll": pnl["payroll"],
         "penalties": pnl["penalties"],

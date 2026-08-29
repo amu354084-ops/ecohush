@@ -881,6 +881,32 @@
       position: relative;
     }
 
+    .expense-breakdown-card {
+      margin-bottom: 18px;
+    }
+
+    .expense-breakdown {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .expense-breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      background: rgba(30, 136, 229, 0.04);
+    }
+
+    .expense-breakdown-row b {
+      color: var(--text);
+      white-space: nowrap;
+    }
+
     #users-table .user-access-menu summary {
       display: inline-flex;
       align-items: center;
@@ -1736,6 +1762,18 @@
             <div class="metric-label">Баланс кассы</div>
             <div class="metric-value" id="metric-cash-balance">0</div>
             <div class="metric-meta">Приходы минус расходы</div>
+          </div>
+        </div>
+
+        <div class="card dashboard-card expense-breakdown-card">
+          <div class="panel-head compact">
+            <div class="panel-title">Состав всех расходов</div>
+            <span class="tag warn">Не входит в себестоимость</span>
+          </div>
+          <div id="dashboard-expense-breakdown" class="expense-breakdown">
+            <div class="expense-breakdown-row"><span>Накладные расходы</span><b>0</b></div>
+            <div class="expense-breakdown-row"><span>Зарплата</span><b>0</b></div>
+            <div class="expense-breakdown-row"><span>Убытки и штрафы</span><b>0</b></div>
           </div>
         </div>
 

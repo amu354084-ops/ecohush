@@ -1037,10 +1037,9 @@ function renderSalesChart(rangeDays = 7) {
   const chart = document.getElementById('sales-chart');
   if (!chart) return;
 
-  const { labels, income, expense } = getSalesChartSeries(rangeDays);
-  const revenue = income.reduce((sum, value) => sum + value, 0);
-  const cogs = Math.min(expense.reduce((sum, value) => sum + value, 0), revenue);
-  const operatingExpenses = Math.min(Number(window.dashboardOperatingExpenses || 0), Math.max(0, revenue - cogs));
+  const revenue = Number(window.dashboardRevenue || 0);
+  const cogs = Math.max(0, Number(window.dashboardCogs || 0));
+  const operatingExpenses = Math.max(0, Number(window.dashboardOperatingExpenses || 0));
   const entries = [
     { label: 'Себестоимость', value: cogs, color: '#ef5d5d' },
     { label: 'Все расходы', value: operatingExpenses, color: '#f0a83c' },
@@ -1140,8 +1139,19 @@ async function loadDashboard() {
   }
   const activeRange = Number(document.querySelector('.range-btn.active')?.dataset.range || 7);
   window.dashboardFinance = data.daily_finance || [];
+  window.dashboardRevenue = Number(data.revenue ?? data.income ?? 0);
+  window.dashboardCogs = Number(data.cogs ?? 0);
   window.dashboardOperatingExpenses = Number(data.operating_expenses ?? 0);
   renderSalesChart(activeRange);
+  const breakdown = data.expense_breakdown || {};
+  const breakdownNode = document.getElementById('dashboard-expense-breakdown');
+  if (breakdownNode) {
+    breakdownNode.innerHTML = [
+      ['Накладные расходы', breakdown.overheads],
+      ['Зарплата', breakdown.payroll],
+      ['Убытки и штрафы', breakdown.penalties],
+    ].map(([label, value]) => `<div class="expense-breakdown-row"><span>${label}</span><b>${formatMoney(value || 0)}</b></div>`).join('');
+  }
   renderTable(
     'top-sales-table',
     [
