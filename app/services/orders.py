@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
+    Batch,
     Counterparty,
     Item,
     Order,
@@ -16,6 +17,7 @@ from app.models.schema import (
     OrderPaymentType,
     OrderStatus,
     User,
+    WarehouseType,
 )
 from app.services.sales import checkout_sale
 from app.models.schema import PaymentMethod
@@ -44,7 +46,16 @@ async def create_order(
         item = await session.get(Item, int(item_data["item_id"]))
         if item is None:
             raise ValueError("Item not found")
-        price = item.price if item_data.get("price") is None else Decimal(item_data["price"])
+        batch_price = await session.scalar(
+            select(Batch.sale_price)
+            .where(
+                Batch.item_id == item.id,
+                Batch.warehouse_id == WarehouseType.FINISHED,
+                Batch.remaining_qty > 0,
+            )
+            .order_by(Batch.created_at.asc(), Batch.id.asc())
+        )
+        price = batch_price if batch_price is not None else item.price
         discount_percent = item_data.get("discount_percent")
         if discount_percent is not None:
             discount = (

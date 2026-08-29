@@ -31,7 +31,7 @@ async def test_order_delivers_and_posts_fifo_debt_only_at_delivery():
     async with session_factory() as session:
         courier = User(username="courier", password_hash="test", role="COURIER", can_change_status=True)
         client = Counterparty(name="Client", phone="79000000000")
-        item = Item(code="ORDER-1", name="Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        item = Item(code="ORDER-1", name="Product", type=ItemType.FINAL, unit="pcs", min_stock=0, price=Decimal("99"))
         warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
         session.add_all([courier, client, item, warehouse])
         await session.flush()
@@ -48,6 +48,8 @@ async def test_order_delivers_and_posts_fifo_debt_only_at_delivery():
         await session.refresh(batch)
         assert order.status == OrderStatus.PENDING
         assert order.invoice_number is None
+        await session.refresh(order, attribute_names=["items"])
+        assert order.items[0].price == Decimal("10.0000")
         assert batch.remaining_qty == Decimal("3.0000")
 
         await accept_order(session, order.id)
