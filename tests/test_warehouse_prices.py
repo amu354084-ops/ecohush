@@ -26,6 +26,25 @@ async def test_incoming_updates_item_price():
 
 
 @pytest.mark.asyncio
+async def test_incoming_preserves_explicit_batch_sale_price():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        item = Item(code="PRICE-EXPLICIT", name="Priced", type=ItemType.FINAL, unit="pcs", price=Decimal("100"))
+        warehouse = Warehouse(id=1, name="Warehouse", description="test")
+        session.add_all([item, warehouse])
+        await session.flush()
+        batch = await add_stock(
+            session, item.id, warehouse.id, Decimal("5"), Decimal("17.50"), sale_price=Decimal("29.00")
+        )
+        assert batch.purchase_cost == Decimal("17.5000")
+        assert batch.sale_price == Decimal("29.0000")
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_move_uses_manual_or_item_price_for_destination_batch():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as connection:
