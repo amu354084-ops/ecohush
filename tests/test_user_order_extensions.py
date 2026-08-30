@@ -24,7 +24,7 @@ async def test_order_item_discount_is_used_at_delivery():
         warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
         session.add_all([courier, client, item, warehouse])
         await session.flush()
-        batch = await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"))
+        batch = await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
         order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 2, "price": 10, "discount": 3}])
         await accept_order(session, order.id)
         await transition_order(session, order.id, OrderStatus.IN_TRANSIT, actor=courier)

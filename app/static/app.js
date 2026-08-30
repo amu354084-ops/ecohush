@@ -61,6 +61,11 @@ function displayValue(value) {
   return displayLabels[mapped] || displayLabels[mapped.toUpperCase()] || String(value);
 }
 
+function bindIfExists(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', handler);
+}
+
 function showView(view) {
   document.body.classList.remove('menu-open');
   const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -1033,26 +1038,30 @@ function getSalesChartSeries(rangeDays = 7) {
   };
 }
 
-function renderSalesChart(rangeDays = 7) {
+function renderSalesChart(chartData) {
   const chart = document.getElementById('sales-chart');
   if (!chart) return;
 
-  const revenue = Number(window.dashboardRevenue || 0);
-  const cogs = Math.max(0, Number(window.dashboardCogs || 0));
-  const operatingExpenses = Math.max(0, Number(window.dashboardOperatingExpenses || 0));
-  const entries = [
-    { label: 'Себестоимость', value: cogs, color: '#ef5d5d' },
-    { label: 'Все расходы', value: operatingExpenses, color: '#f0a83c' },
-    { label: 'Прибыль', value: Math.max(0, revenue - cogs - operatingExpenses), color: '#194b9a' },
-  ].filter((entry) => entry.value > 0);
+  const revenue = Number(chartData?.revenue || 0);
+  const entries = (chartData?.values || []).map((entry) => {
+    const rawValue = Number(entry.value || 0);
+    const displayValue = entry.key === 'net_profit' && rawValue < 0 ? Math.abs(rawValue) : rawValue;
+    return {
+      ...entry,
+      rawValue,
+      value: rawValue,
+      displayValue,
+      label: entry.key === 'net_profit' && rawValue < 0 ? 'Убыток' : (entry.label || 'Сектор'),
+    };
+  }).filter((entry) => entry.displayValue > 0 || entry.value < 0);
   if (!revenue || !entries.length) {
     chart.innerHTML = '<div class="pie-empty">Нет продаж за выбранный период</div>';
     return;
   }
-  const total = entries.reduce((sum, entry) => sum + entry.value, 0);
+  const total = entries.reduce((sum, entry) => sum + entry.displayValue, 0) || revenue;
   let position = 0;
   const segments = entries.map((entry) => {
-    const end = position + (entry.value / total) * 100;
+    const end = position + (entry.displayValue / total) * 100;
     const segment = `${entry.color} ${position}% ${end}%`;
     position = end;
     return segment;
@@ -1060,15 +1069,16 @@ function renderSalesChart(rangeDays = 7) {
   const legend = entries.map((entry) => `
     <div class="pie-legend-item">
       <span><i class="pie-swatch" style="background:${entry.color}"></i>${entry.label}</span>
-      <b>${formatMoney(entry.value)}</b><small>${((entry.value / total) * 100).toFixed(1)}%</small>
+      <b>${formatMoney(entry.displayValue)}</b><small>${((entry.displayValue / total) * 100).toFixed(1)}%</small>
     </div>
   `).join('');
+  const lossWarning = chartData.negative_profit ? '<div class="pie-warning">Убыток за период: <strong>' + formatMoney(Math.abs(Number(chartData.values?.find((entry) => entry.key === 'net_profit')?.value || 0))) + '</strong></div>' : '';
   chart.innerHTML = `
     <div class="pie-layout">
       <div class="pie" style="background:conic-gradient(${segments.join(', ')})">
-        <div class="pie-center"><strong>${formatMoney(revenue)}</strong><span>выручка</span></div>
+        <div class="pie-center"><strong>${formatMoney(revenue)}</strong><span>${chartData.negative_profit ? 'выручка' : 'выручка'}</span></div>
       </div>
-      <div class="pie-legend"><div class="pie-legend-title">Распределение выручки</div>${legend}</div>
+      <div class="pie-legend"><div class="pie-legend-title">Распределение выручки</div>${legend}${lossWarning}</div>
     </div>
   `;
 }
@@ -1080,7 +1090,13 @@ async function loadDashboard() {
     statusNode.textContent = 'Загрузка...';
     statusNode.classList.remove('error', 'success');
   }
-  const data = await fetchJson('/api/v1/dashboard/summary');
+  const params = new URLSearchParams();
+  const dateFrom = document.getElementById('dashboard-date-from')?.value;
+  const dateTo = document.getElementById('dashboard-date-to')?.value;
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const data = await fetchJson(`/api/v1/dashboard/summary${query}`);
   if (data?.detail) {
     if (statusNode) {
       statusNode.textContent = `Ошибка: ${data.detail}`;
@@ -1137,12 +1153,7 @@ async function loadDashboard() {
       .map((item) => `${item.name} (${item.code}): ${item.remaining_qty} ${item.unit}, минимум ${item.min_stock}`)
       .join('; ');
   }
-  const activeRange = Number(document.querySelector('.range-btn.active')?.dataset.range || 7);
-  window.dashboardFinance = data.daily_finance || [];
-  window.dashboardRevenue = Number(data.revenue ?? data.income ?? 0);
-  window.dashboardCogs = Number(data.cogs ?? 0);
-  window.dashboardOperatingExpenses = Number(data.operating_expenses ?? 0);
-  renderSalesChart(activeRange);
+  renderSalesChart(data.chart);
   const breakdown = data.expense_breakdown || {};
   const breakdownNode = document.getElementById('dashboard-expense-breakdown');
   if (breakdownNode) {
@@ -1185,6 +1196,15 @@ async function loadDashboard() {
     });
   });
 }
+
+bindIfExists('dashboard-period-apply', loadDashboard);
+bindIfExists('dashboard-period-reset', () => {
+  const from = document.getElementById('dashboard-date-from');
+  const to = document.getElementById('dashboard-date-to');
+  if (from) from.value = '';
+  if (to) to.value = '';
+  return loadDashboard();
+});
 
 function renderTable(tableId, columns, rows, emptyText = 'Данные отсутствуют.') {
   const table = document.getElementById(tableId);
@@ -1229,7 +1249,16 @@ async function fetchItems() {
     window.inventoryItems = Array.isArray(data) ? data : [];
   }
   refreshDynamicSelectors();
-  renderTable('items-table', ['id', 'code', 'name', 'type', 'unit', 'min_stock', 'price'], window.inventoryItems);
+  renderTable('items-table', [
+    { key: 'id', label: 'ID' },
+    { key: 'code', label: 'Код' },
+    { key: 'name', label: 'Название' },
+    { key: 'type', label: 'Тип' },
+    { key: 'unit', label: 'Ед.' },
+    { key: 'min_stock', label: 'Мин. остаток' },
+    { key: 'purchase_cost', label: 'Закупочная себестоимость, TJS' },
+    { key: 'sale_price', label: 'Цена продажи, TJS' },
+  ], window.inventoryItems);
   bindItemPriceEditors();
 }
 
@@ -1317,7 +1346,8 @@ function renderWarehouseTables() {
       { key: 'type', label: 'Тип' },
       { key: 'unit', label: 'Ед.' },
       { key: 'min_stock', label: 'Мин. остаток' },
-      { key: 'price', label: 'Базовая цена, TJS' },
+      { key: 'purchase_cost', label: 'Закупочная себестоимость, TJS' },
+      { key: 'sale_price', label: 'Цена продажи, TJS' },
     ],
     window.inventoryItems || []
   );
@@ -1690,11 +1720,6 @@ document.addEventListener('DOMContentLoaded', () => {
     mobileMenuToggle?.setAttribute('aria-label', 'Открыть меню');
     mobileMenuToggle?.focus();
   });
-
-  const bindIfExists = (id, handler) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', handler);
-  };
 
   bindIfExists('go-create-worker', () => {
     showView('users');

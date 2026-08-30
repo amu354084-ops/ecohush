@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import Any
 
 from decimal import Decimal
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError
@@ -31,9 +32,6 @@ async def create_shipment(
     for it in items:
         item_id = int(it["item_id"])
         qty: Decimal = Decimal(it["qty"])
-        unit_price: Decimal | None = None
-        if "unit_price" in it and it["unit_price"] is not None:
-            unit_price = Decimal(it["unit_price"])
 
         discount_percent = Decimal(it.get("discount_percent", 0) or 0)
         if discount_percent < 0 or discount_percent > 100:
@@ -49,20 +47,24 @@ async def create_shipment(
             txn_type=StockTransactionType.SALE,
             comment=f"Shipment to {recipient_name}",
         )
+        if any(move["unit_cost"] <= 0 for move in batch_moves):
+            raise ValueError("Нельзя оформить отгрузку: у партии отсутствует себестоимость")
+        if any(move["unit_price"] <= 0 for move in batch_moves):
+            raise ValueError("Нельзя оформить отгрузку: у партии отсутствует цена продажи")
 
         for mv in batch_moves:
+            effective_price = mv["unit_price"]
             si = ShipmentItem(
                 shipment_id=shipment.id,
                 item_id=item_id,
                 batch_id=mv["batch_id"],
                 qty=mv["qty"],
-                unit_price=unit_price,
+                unit_price=effective_price,
                 discount_percent=discount_percent,
                 cost_price=mv["unit_cost"],
             )
             session.add(si)
-            if unit_price is not None:
-                total_amount += unit_price * mv["qty"] * discount_multiplier
+            total_amount += effective_price * mv["qty"] * discount_multiplier
 
     shipment.total_amount = total_amount
     shipment.status = "IN_TRANSIT"
@@ -72,7 +74,7 @@ async def create_shipment(
 
 
 async def get_shipments(session: AsyncSession) -> list[Shipment]:
-    result = await session.execute("SELECT * FROM shipments ORDER BY created_at DESC")
+    result = await session.execute(select(Shipment).order_by(Shipment.created_at.desc()))
     # lightweight: use ORM query in callers if more detail is needed
     return result.fetchall()
 

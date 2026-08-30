@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from io import BytesIO
 from typing import Any
 
@@ -15,6 +15,7 @@ from app.models.schema import PayrollEntry, PayrollPenalty, Sale, SaleItem, Over
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary
 from app.services.google_sheets import sync_report_sections
+from app.services.timezone import get_app_timezone
 
 
 async def get_session() -> AsyncSession:
@@ -27,7 +28,7 @@ router = APIRouter(dependencies=[Depends(require_section("reports"))])
 
 
 def _period_datetime(value: date, boundary: time) -> datetime:
-    return datetime.combine(value, boundary, tzinfo=timezone.utc)
+    return datetime.combine(value, boundary, tzinfo=get_app_timezone())
 
 
 def _excel_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -73,7 +74,7 @@ async def build_report_sections(
 
     sale_ids = [row["Продажа №"] for row in sales_rows]
     sale_items_stmt = (
-        select(SaleItem).where(SaleItem.sale_id.in_(sale_ids))
+        select(SaleItem).options(selectinload(SaleItem.item)).where(SaleItem.sale_id.in_(sale_ids))
         if sale_ids
         else select(SaleItem).where(SaleItem.id < 0)
     )
@@ -103,9 +104,14 @@ async def build_report_sections(
         for item in result.scalars().all()
     ]
 
-    payroll_result = await session.execute(
-        select(PayrollEntry, User).join(User, User.id == PayrollEntry.employee_id)
-    )
+    payroll_stmt = select(PayrollEntry, User).join(User, User.id == PayrollEntry.employee_id)
+    if date_from is not None:
+        period_from = date_from.isoformat()[:7] if isinstance(date_from, date) else str(date_from)[:7]
+        payroll_stmt = payroll_stmt.where(PayrollEntry.period >= period_from)
+    if date_to is not None:
+        period_to = date_to.isoformat()[:7] if isinstance(date_to, date) else str(date_to)[:7]
+        payroll_stmt = payroll_stmt.where(PayrollEntry.period <= period_to)
+    payroll_result = await session.execute(payroll_stmt)
     payroll_rows = [
         {
             "Сотрудник": user.full_name or user.username,
@@ -118,9 +124,14 @@ async def build_report_sections(
         }
         for entry, user in payroll_result
     ]
-    penalties_result = await session.execute(
-        select(PayrollPenalty, User).join(User, User.id == PayrollPenalty.employee_id)
-    )
+    penalties_stmt = select(PayrollPenalty, User).join(User, User.id == PayrollPenalty.employee_id)
+    if date_from is not None:
+        period_from = date_from.isoformat()[:7] if isinstance(date_from, date) else str(date_from)[:7]
+        penalties_stmt = penalties_stmt.where(PayrollPenalty.period >= period_from)
+    if date_to is not None:
+        period_to = date_to.isoformat()[:7] if isinstance(date_to, date) else str(date_to)[:7]
+        penalties_stmt = penalties_stmt.where(PayrollPenalty.period <= period_to)
+    penalties_result = await session.execute(penalties_stmt)
     penalties_rows = [
         {
             "Сотрудник": user.full_name or user.username,
@@ -139,7 +150,10 @@ async def build_report_sections(
     company_summary = [{
         "Выручка": float(summary["revenue"]),
         "Себестоимость": float(summary["cogs"]),
+        "Валовая прибыль": float(summary["gross_profit"]),
+        "Валовая маржа, %": float(summary["gross_margin"]),
         "Накладные расходы": float(summary["overheads"]),
+        "Все расходы": float(summary["operating_expenses"]),
         "Зарплата": float(summary["payroll"]),
         "Штрафы": float(summary["penalties"]),
         "Зарплата к выплате": float(summary["net_payroll"]),

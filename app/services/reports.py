@@ -64,25 +64,28 @@ async def build_pnl_summary(
     result = await session.execute(overheads_stmt)
     overheads = Decimal(result.scalar() or 0).quantize(Decimal("0.01"))
 
-    profit = (revenue - cogs - overheads).quantize(Decimal("0.01"))
-
     payroll_stmt = select(func.coalesce(func.sum(PayrollEntry.total_amount), 0))
-    if date_from:
-        payroll_stmt = payroll_stmt.where(PayrollEntry.period >= date_from.strftime("%Y-%m"))
-    if date_to:
-        payroll_stmt = payroll_stmt.where(PayrollEntry.period <= date_to.strftime("%Y-%m"))
+    if date_from is not None:
+        period_from = date_from.strftime("%Y-%m") if isinstance(date_from, datetime) else str(date_from)[:7]
+        payroll_stmt = payroll_stmt.where(PayrollEntry.period >= period_from)
+    if date_to is not None:
+        period_to = date_to.strftime("%Y-%m") if isinstance(date_to, datetime) else str(date_to)[:7]
+        payroll_stmt = payroll_stmt.where(PayrollEntry.period <= period_to)
     payroll = Decimal((await session.execute(payroll_stmt)).scalar() or 0).quantize(Decimal("0.01"))
     penalty_stmt = select(func.coalesce(func.sum(PayrollPenalty.amount), 0))
-    if date_from:
-        penalty_stmt = penalty_stmt.where(PayrollPenalty.period >= date_from.strftime("%Y-%m"))
-    if date_to:
-        penalty_stmt = penalty_stmt.where(PayrollPenalty.period <= date_to.strftime("%Y-%m"))
+    if date_from is not None:
+        period_from = date_from.strftime("%Y-%m") if isinstance(date_from, datetime) else str(date_from)[:7]
+        penalty_stmt = penalty_stmt.where(PayrollPenalty.period >= period_from)
+    if date_to is not None:
+        period_to = date_to.strftime("%Y-%m") if isinstance(date_to, datetime) else str(date_to)[:7]
+        penalty_stmt = penalty_stmt.where(PayrollPenalty.period <= period_to)
     penalties = Decimal((await session.execute(penalty_stmt)).scalar() or 0).quantize(Decimal("0.01"))
     net_payroll = payroll - penalties
     profit = (revenue - cogs - overheads - payroll - penalties).quantize(Decimal("0.01"))
     gross_profit = (revenue - cogs).quantize(Decimal("0.01"))
     markup = (gross_profit / cogs * Decimal("100")).quantize(Decimal("0.01")) if cogs else Decimal("0.00")
     operating_expenses = (overheads + payroll + penalties).quantize(Decimal("0.01"))
+    gross_margin = (gross_profit / revenue * Decimal("100")).quantize(Decimal("0.01")) if revenue else Decimal("0.00")
 
     cash_stmt = select(
         func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.INCOME, CashTransaction.amount), else_=0)), 0),
@@ -101,6 +104,7 @@ async def build_pnl_summary(
         "revenue": revenue,
         "cogs": cogs,
         "gross_profit": gross_profit,
+        "gross_margin": gross_margin,
         "markup": markup,
         "overheads": overheads,
         "operating_expenses": operating_expenses,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 import re
 from typing import Any
@@ -21,6 +21,7 @@ from app.models.schema import (
 )
 from app.services.sales import checkout_sale
 from app.models.schema import PaymentMethod
+from app.services.timezone import get_app_timezone
 
 
 async def create_order(
@@ -52,10 +53,13 @@ async def create_order(
                 Batch.item_id == item.id,
                 Batch.warehouse_id == WarehouseType.FINISHED,
                 Batch.remaining_qty > 0,
+                Batch.sale_price > 0,
             )
             .order_by(Batch.created_at.asc(), Batch.id.asc())
         )
-        price = batch_price if batch_price is not None else item.price
+        if batch_price is None:
+            raise ValueError("Для товара нет активной партии с ценой продажи")
+        price = batch_price
         discount_percent = item_data.get("discount_percent")
         if discount_percent is not None:
             discount = (
@@ -163,7 +167,7 @@ async def _complete_delivery(
     )
     order.status = OrderStatus.DELIVERED
     order.payment_type = payment_type
-    order.delivered_at = datetime.now(timezone.utc)
+    order.delivered_at = datetime.now(get_app_timezone())
     await session.flush()
 
 
@@ -176,7 +180,7 @@ async def _get_order(session: AsyncSession, order_id: int) -> Order:
 
 
 async def _next_invoice_number(session: AsyncSession) -> str:
-    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    day = datetime.now(get_app_timezone()).strftime("%Y%m%d")
     numbers = (await session.scalars(select(Order.invoice_number))).all()
     suffixes = [
         int(match.group(1))

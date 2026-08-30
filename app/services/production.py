@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -23,6 +23,7 @@ from app.models.schema import (
     ProductionOrderStatus,
 )
 from app.services.inventory import create_batch, create_stock_transaction, deduct_fifo
+from app.services.timezone import get_app_timezone
 
 
 async def create_production_order(
@@ -80,7 +81,7 @@ async def complete_production_order(
     order.actual_qty = actual_qty
     order.overhead_amount = additional_overheads
     order.status = ProductionOrderStatus.COMPLETED
-    order.completed_at = datetime.now(timezone.utc)
+    order.completed_at = datetime.now(get_app_timezone())
     await session.flush()
     return {"order_id": order.id, "batch_number": order.batch_number, "finished_batch_id": finished_batch.id, "actual_qty": actual_qty, "unit_cost": unit_cost, "usages": usages}
 

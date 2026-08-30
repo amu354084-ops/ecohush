@@ -12,6 +12,7 @@ from app.models.schema import (
     Counterparty,
     Item,
     ItemType,
+    OverheadExpense,
     PaymentMethod,
     Sale,
     SaleItem,
@@ -19,6 +20,11 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.dashboard import build_dashboard_summary
+from app.services.timezone import get_app_timezone
+
+
+def test_app_timezone_is_dushanbe():
+    assert get_app_timezone().key == "Asia/Dushanbe"
 
 
 async def _setup_db():
@@ -71,6 +77,7 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
             payment_method=PaymentMethod.BANK,
             description="rent",
         )
+        overhead = None
         session.add_all([warehouse, item, batch, low_stock_item, low_stock_batch, sale, sale_item, expense])
         await session.commit()
 
@@ -81,6 +88,8 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
         assert summary["cogs"] == Decimal("40.00")
         assert summary["expense"] == Decimal("0.00")
         assert summary["profit"] == Decimal("60.00")
+        chart_total = sum((entry["value"] for entry in summary["chart"]["values"]), Decimal("0.00"))
+        assert chart_total == summary["revenue"]
         assert summary["cash_income"] == Decimal("0.00")
         assert summary["cash_expenses"] == Decimal("30.00")
         assert summary["company_balance"] == Decimal("-30.00")
@@ -100,6 +109,123 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
         assert summary["daily_finance"]
         assert any(row["income"] == Decimal("100.00") for row in summary["daily_finance"])
         assert any(row["expense"] == Decimal("40.00") for row in summary["daily_finance"])
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_chart_keeps_strict_financial_formula_for_negative_profit():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="WH", description="test")
+        item = Item(code="D4", name="Loss Item", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        batch = Batch(
+            item=item,
+            warehouse=warehouse,
+            purchase_cost=Decimal("40.00"),
+            initial_qty=Decimal("10.00"),
+            remaining_qty=Decimal("10.00"),
+        )
+        sale = Sale(
+            counterparty_id=None,
+            total_amount=Decimal("100.00"),
+            paid_amount=Decimal("100.00"),
+            debt_amount=Decimal("0.00"),
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add_all([
+            warehouse,
+            item,
+            batch,
+            sale,
+            SaleItem(
+                sale=sale,
+                item=item,
+                batch=batch,
+                qty=Decimal("2.00"),
+                unit_price=Decimal("50.00"),
+                cost_price=Decimal("40.00"),
+            ),
+            OverheadExpense(category="rent", amount=Decimal("30.00"), created_at=datetime.now(timezone.utc)),
+        ])
+        await session.commit()
+
+        summary = await build_dashboard_summary(session)
+
+        assert summary["profit"] == Decimal("-10.00")
+        assert summary["cogs"] == Decimal("80.00")
+        assert summary["operating_expenses"] == Decimal("30.00")
+        assert summary["revenue"] == Decimal("100.00")
+        chart_total = sum((entry["value"] for entry in summary["chart"]["values"]), Decimal("0.00"))
+        assert chart_total == summary["revenue"]
+        assert any(entry["key"] == "net_profit" and entry["value"] < 0 for entry in summary["chart"]["values"])
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_daily_summary_respects_selected_period():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="WH", description="test")
+        item = Item(code="D3", name="Period Item", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        batch = Batch(
+            item=item,
+            warehouse=warehouse,
+            purchase_cost=Decimal("10.00"),
+            initial_qty=Decimal("10.00"),
+            remaining_qty=Decimal("10.00"),
+        )
+        in_range_day = datetime(2026, 8, 15, 9, 30, tzinfo=timezone.utc)
+        out_of_range_day = datetime(2026, 7, 10, 9, 30, tzinfo=timezone.utc)
+        in_range_sale = Sale(
+            counterparty_id=None,
+            total_amount=Decimal("120.00"),
+            paid_amount=Decimal("120.00"),
+            debt_amount=Decimal("0.00"),
+            created_at=in_range_day,
+        )
+        out_of_range_sale = Sale(
+            counterparty_id=None,
+            total_amount=Decimal("50.00"),
+            paid_amount=Decimal("50.00"),
+            debt_amount=Decimal("0.00"),
+            created_at=out_of_range_day,
+        )
+        session.add_all([
+            warehouse,
+            item,
+            batch,
+            in_range_sale,
+            out_of_range_sale,
+            SaleItem(
+                sale=in_range_sale,
+                item=item,
+                batch=batch,
+                qty=Decimal("2.00"),
+                unit_price=Decimal("60.00"),
+                cost_price=Decimal("10.00"),
+            ),
+            SaleItem(
+                sale=out_of_range_sale,
+                item=item,
+                batch=batch,
+                qty=Decimal("1.00"),
+                unit_price=Decimal("50.00"),
+                cost_price=Decimal("10.00"),
+            ),
+        ])
+        await session.commit()
+
+        summary = await build_dashboard_summary(
+            session,
+            date_from=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            date_to=datetime(2026, 8, 31, 23, 59, 59, tzinfo=timezone.utc),
+        )
+
+        assert summary["income"] == Decimal("120.00")
+        assert not any(row["day"] == out_of_range_day.date().isoformat() and row["income"] != Decimal("0.00") for row in summary["daily_sales"])
+        assert any(row["day"] == in_range_day.date().isoformat() and row["income"] == Decimal("120.00") for row in summary["daily_sales"])
 
     await engine.dispose()
 

@@ -53,6 +53,10 @@ async def checkout_sale(
             txn_type=StockTransactionType.SALE,
             comment="Sale checkout",
         )
+        if any(move["unit_cost"] <= 0 for move in moves):
+            raise ValueError("Нельзя оформить продажу: у партии отсутствует себестоимость")
+        if any(move["unit_price"] <= 0 for move in moves):
+            raise ValueError("Нельзя оформить продажу: у партии отсутствует цена продажи")
         unit_price = sum(
             (move["qty"] * move["unit_price"] for move in moves),
             Decimal(0),

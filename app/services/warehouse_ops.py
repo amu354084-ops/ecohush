@@ -22,21 +22,20 @@ async def add_stock(
 ) -> Batch:
     if qty <= 0:
         raise ValueError("Quantity must be positive")
-    if cost < 0:
-        raise ValueError("Cost must be non-negative")
+    if cost <= 0:
+        raise ValueError("Себестоимость обязательна и должна быть больше нуля")
 
     item = await session.get(Item, item_id)
     if item is None:
         raise ValueError("Item not found")
     if sale_price is not None and sale_price < 0:
         raise ValueError("Sale price must be non-negative")
-    item.price = sale_price if sale_price is not None else cost
 
     batch = Batch(
         item_id=item_id,
         warehouse_id=warehouse_id,
         purchase_cost=cost,
-        sale_price=sale_price if sale_price is not None else item.price,
+        sale_price=sale_price if sale_price is not None else Decimal("0"),
         initial_qty=qty,
         remaining_qty=qty,
     )

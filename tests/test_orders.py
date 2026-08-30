@@ -80,8 +80,10 @@ async def test_order_item_discount_percent_is_converted_to_amount():
         courier = User(username="percent-courier", password_hash="test", role="COURIER")
         client = Counterparty(name="Percent Client")
         item = Item(code="PERCENT-1", name="Percent Product", type=ItemType.FINAL, unit="pcs", min_stock=0, price=Decimal("100"))
-        session.add_all([courier, client, item])
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, client, item, warehouse])
         await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("100"))
 
         order = await create_order(
             session, courier.id, client.id,
@@ -104,8 +106,10 @@ async def test_order_accept_rejects_discount_above_total():
         courier = User(username="discount-limit-courier", password_hash="test", role="COURIER")
         client = Counterparty(name="Discount Limit Client")
         item = Item(code="DISCOUNT-LIMIT", name="Discount Limit Product", type=ItemType.FINAL, unit="pcs", min_stock=0, price=Decimal("10"))
-        session.add_all([courier, client, item])
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, client, item, warehouse])
         await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
         order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 2, "price": 10}])
         with pytest.raises(ValueError, match="cannot exceed order total"):
             await accept_order(session, order.id, Decimal("21"))

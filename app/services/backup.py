@@ -236,7 +236,7 @@ def run_db_backup() -> dict[str, Any]:
 
 
 def schedule_backups() -> AsyncIOScheduler:
-    scheduler = AsyncIOScheduler(timezone=_setting("BACKUP_TIMEZONE") or "UTC")
+    scheduler = AsyncIOScheduler(timezone=_setting("BACKUP_TIMEZONE") or "Asia/Dushanbe")
     scheduler.add_job(
         create_local_backup,
         "cron",

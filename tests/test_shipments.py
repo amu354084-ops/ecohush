@@ -14,6 +14,7 @@ async def _setup_inventory(session):
         item_id=item.id,
         warehouse_id=warehouse.id,
         purchase_cost=Decimal("10.00"),
+        sale_price=Decimal("20.00"),
         initial_qty=Decimal("5.00"),
         remaining_qty=Decimal("5.00"),
     )

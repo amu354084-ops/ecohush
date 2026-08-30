@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
@@ -11,10 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import Batch, Counterparty, Item, ItemType, Sale, SaleItem, SaleItemBatchAllocation
 from app.services.reports import build_pnl_summary
+from app.services.timezone import get_app_timezone
 
 
-async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
-    sales_result = await session.execute(select(Sale))
+async def build_dashboard_summary(
+    session: AsyncSession,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> dict[str, Any]:
+    sales_stmt = select(Sale)
+    if date_from:
+        sales_stmt = sales_stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        sales_stmt = sales_stmt.where(Sale.created_at <= date_to)
+    sales_result = await session.execute(sales_stmt)
     sales = sales_result.scalars().all()
 
     items_result = await session.execute(select(Item))
@@ -23,10 +33,15 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
     batches_result = await session.execute(select(Batch))
     batches = batches_result.scalars().all()
 
-    pnl = await build_pnl_summary(session)
+    pnl = await build_pnl_summary(session, date_from, date_to)
     income = pnl["revenue"]
     expense = pnl["operating_expenses"]
     profit = pnl["profit"]
+    financial_check = (
+        pnl["revenue"] - pnl["cogs"] - pnl["operating_expenses"] - pnl["profit"]
+    ).quantize(Decimal("0.01"))
+    if abs(financial_check) > Decimal("0.01"):
+        raise ValueError("Dashboard financial totals are inconsistent")
 
     total_stock_qty = sum((batch.remaining_qty or Decimal("0")) for batch in batches)
     stock_by_item: dict[int, Decimal] = {}
@@ -53,14 +68,21 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
     ]
     low_stock_details.sort(key=lambda item: (item["name"].casefold(), item["code"].casefold()))
 
-    today = datetime.now(timezone.utc).date()
-    chart_start = today - timedelta(days=89)
+    tz = get_app_timezone()
+    today = datetime.now(tz).date()
+    default_chart_start = today - timedelta(days=89)
+    chart_start = date_from.date() if date_from else default_chart_start
+    chart_end = date_to.date() if date_to else today
+
+    chart_start_dt = datetime.combine(chart_start, datetime.min.time(), tzinfo=tz)
+    chart_end_dt = datetime.combine(chart_end, datetime.max.time(), tzinfo=tz)
+
     daily_result = await session.execute(
         select(
             func.date(Sale.created_at).label("day"),
             func.coalesce(func.sum(Sale.total_amount), 0).label("income"),
         )
-        .where(Sale.created_at >= datetime.combine(chart_start, datetime.min.time(), tzinfo=timezone.utc))
+        .where(Sale.created_at >= chart_start_dt, Sale.created_at <= chart_end_dt)
         .group_by(func.date(Sale.created_at))
         .order_by(func.date(Sale.created_at))
     )
@@ -80,7 +102,7 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         )
         .join(SaleItem, SaleItem.sale_id == Sale.id)
         .join(SaleItemBatchAllocation, SaleItemBatchAllocation.sale_item_id == SaleItem.id)
-        .where(Sale.created_at >= datetime.combine(chart_start, datetime.min.time(), tzinfo=timezone.utc))
+        .where(Sale.created_at >= chart_start_dt, Sale.created_at <= chart_end_dt)
         .group_by(func.date(Sale.created_at))
         .order_by(func.date(Sale.created_at))
     )
@@ -92,7 +114,8 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         )
         .join(SaleItem, SaleItem.sale_id == Sale.id)
         .where(
-            Sale.created_at >= datetime.combine(chart_start, datetime.min.time(), tzinfo=timezone.utc),
+            Sale.created_at >= chart_start_dt,
+            Sale.created_at <= chart_end_dt,
             ~exists().where(SaleItemBatchAllocation.sale_item_id == SaleItem.id),
         )
         .group_by(func.date(Sale.created_at))
@@ -151,6 +174,17 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         for row in top_clients_result
     ]
 
+    chart_values = [
+        {"key": "cogs", "label": "Себестоимость", "value": pnl["cogs"], "color": "#EF4444"},
+        {"key": "operating_expenses", "label": "Все расходы", "value": pnl["operating_expenses"], "color": "#F97316"},
+        {
+            "key": "net_profit",
+            "label": "Чистая прибыль" if pnl["profit"] >= 0 else "Убыток",
+            "value": pnl["profit"],
+            "color": "#8B5CF6",
+        },
+    ]
+
     return {
         "sales_count": len(sales),
         "production_count": len([b for b in batches if b.remaining_qty > 0]),
@@ -163,9 +197,22 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         "income": income,
         "expense": expense,
         "profit": profit,
+        "net_profit": pnl["profit"],
+        "gross_profit": pnl["gross_profit"],
+        "gross_margin": pnl["gross_margin"],
         "revenue": pnl["revenue"],
         "cogs": pnl["cogs"],
         "operating_expenses": pnl["operating_expenses"],
+        "financial_check": financial_check,
+        "period": {
+            "from": date_from.date().isoformat() if date_from else None,
+            "to": date_to.date().isoformat() if date_to else None,
+        },
+        "chart": {
+            "revenue": pnl["revenue"],
+            "negative_profit": pnl["profit"] < 0,
+            "values": chart_values,
+        },
         "expense_breakdown": {
             "overheads": pnl["overheads"],
             "payroll": pnl["payroll"],
@@ -180,14 +227,14 @@ async def build_dashboard_summary(session: AsyncSession) -> dict[str, Any]:
         "company_balance": pnl["company_balance"],
         "daily_sales": [
             {"day": day.isoformat(), "income": daily_sales.get(day.isoformat(), Decimal("0.00"))}
-            for day in (chart_start + timedelta(days=offset) for offset in range(90))
+            for day in (chart_start + timedelta(days=offset) for offset in range((chart_end - chart_start).days + 1))
         ],
         "daily_finance": [
             {
                 "day": day.isoformat(),
                 **daily_sales_flow.get(day.isoformat(), {"income": Decimal("0.00"), "expense": Decimal("0.00")}),
             }
-            for day in (chart_start + timedelta(days=offset) for offset in range(90))
+            for day in (chart_start + timedelta(days=offset) for offset in range((chart_end - chart_start).days + 1))
         ],
         "recent_sales": recent_sales,
         "top_clients": top_clients,

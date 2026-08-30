@@ -114,6 +114,8 @@ async def finance_overview(
         "income": str(summary["revenue"]),
         "revenue": str(summary["revenue"]),
         "cogs": str(summary["cogs"]),
+        "gross_profit": str(summary["gross_profit"]),
+        "gross_margin": str(summary["gross_margin"]),
         "operating_expenses": str(summary["operating_expenses"]),
         "cash_income": str(summary["cash_income"]),
         "cash_expenses": str(summary["cash_expenses"]),
@@ -203,6 +205,8 @@ async def add_overhead(request: OverheadCreateRequest, session: AsyncSession = s
     overhead = OverheadExpense(category=request.category, amount=request.amount)
     session.add(overhead)
     await session.flush()
+    await session.commit()
+    await session.refresh(overhead)
     return OverheadResponse(id=overhead.id, category=display_label(overhead.category), amount=str(overhead.amount))
 
 

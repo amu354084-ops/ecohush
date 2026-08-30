@@ -433,6 +433,11 @@
       background: linear-gradient(180deg, #fffdf4, #fff);
     }
 
+    .metric-card.orange {
+      background: linear-gradient(180deg, #fff7ed, #fff);
+      border-color: rgba(249, 115, 22, 0.22);
+    }
+
     .chart-box {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -879,6 +884,19 @@
 
     #users-table .user-access-menu {
       position: relative;
+    }
+
+    .primary-metrics {
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+    }
+
+    .secondary-metrics {
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+
+    .metric-card.purple {
+      background: rgba(139, 92, 246, 0.08);
+      border-color: rgba(139, 92, 246, 0.22);
     }
 
     .expense-breakdown-card {
@@ -1732,31 +1750,41 @@
           </div>
         </div>
 
-        <div class="metrics-grid">
+        <div class="dashboard-period">
+          <label>Период от <input id="dashboard-date-from" type="date"></label>
+          <label>до <input id="dashboard-date-to" type="date"></label>
+          <button id="dashboard-period-apply" type="button">Применить</button>
+          <button id="dashboard-period-reset" type="button">Весь период</button>
+        </div>
+
+        <div class="metrics-grid primary-metrics">
           <div class="metric-card green">
-            <div class="metric-label">Остаток</div>
-            <div class="metric-value" id="metric-stock">0</div>
-            <div class="metric-meta">Товаров на складе</div>
-          </div>
-          <div class="metric-card blue">
             <div class="metric-label">Выручка</div>
             <div class="metric-value" id="metric-sales">0</div>
             <div class="metric-meta">Выручка по проведённым продажам</div>
           </div>
-          <div class="metric-card yellow">
+          <div class="metric-card red">
             <div class="metric-label">Себестоимость</div>
             <div class="metric-value" id="metric-cogs">0</div>
             <div class="metric-meta">Себестоимость проданных партий</div>
           </div>
-          <div class="metric-card yellow">
+          <div class="metric-card orange">
             <div class="metric-label">Все расходы</div>
             <div class="metric-value" id="metric-expense">0</div>
             <div class="metric-meta">Накладные расходы, зарплата и штрафы</div>
           </div>
-          <div class="metric-card red">
-            <div class="metric-label">Прибыль</div>
+          <div class="metric-card purple">
+            <div class="metric-label">Чистая прибыль</div>
             <div class="metric-value" id="metric-profit">0</div>
             <div class="metric-meta">Чистый результат</div>
+          </div>
+        </div>
+
+        <div class="metrics-grid secondary-metrics">
+          <div class="metric-card green">
+            <div class="metric-label">Остаток</div>
+            <div class="metric-value" id="metric-stock">0</div>
+            <div class="metric-meta">Товаров на складе</div>
           </div>
           <div class="metric-card blue">
             <div class="metric-label">Баланс кассы</div>
@@ -1792,11 +1820,6 @@
           <div class="panel-head">
             <div class="panel-title">Финансовая структура выручки</div>
             <div class="chart-toolbar">
-              <div class="range-switch">
-                <button type="button" class="range-btn active" data-range="7">7 дн</button>
-                <button type="button" class="range-btn" data-range="30">30 дн</button>
-                <button type="button" class="range-btn" data-range="90">90 дн</button>
-              </div>
               <div class="legend">
                 <span><i style="background:#ef5d5d"></i>Себестоимость</span>
                 <span><i style="background:#f0a83c"></i>Все расходы</span>
@@ -2722,7 +2745,7 @@
     </div>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260830-1"></script>
   <script>
     const settingsSearch = document.getElementById('settings-search');
     const settingsButtons = Array.from(document.querySelectorAll('.settings-menu-btn'));

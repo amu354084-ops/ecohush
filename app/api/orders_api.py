@@ -137,8 +137,25 @@ async def me(user: User = Depends(current_user)):
 
 @router.get("/orders/catalog")
 async def order_catalog(_: User = Depends(require_section("orders")), session: AsyncSession = Depends(get_session)):
-    items = (await session.execute(select(Item).where(Item.type == ItemType.FINAL).order_by(Item.name))).scalars().all()
-    return [{"id": item.id, "name": item.name, "code": item.code, "unit": item.unit, "type_code": item.type.value, "price": str(item.price or 0)} for item in items]
+    items = (await session.execute(
+        select(Item).options(selectinload(Item.batches)).where(Item.type == ItemType.FINAL).order_by(Item.name)
+    )).scalars().all()
+    catalog = []
+    for item in items:
+        active_batches = [batch for batch in item.batches if batch.remaining_qty > 0 and batch.sale_price > 0]
+        if not active_batches:
+            continue
+        batch = min(active_batches, key=lambda value: (value.created_at, value.id))
+        catalog.append({
+            "id": item.id,
+            "name": item.name,
+            "code": item.code,
+            "unit": item.unit,
+            "type_code": item.type.value,
+            "price": str(batch.sale_price),
+            "available_qty": str(sum((value.remaining_qty for value in active_batches), Decimal(0))),
+        })
+    return catalog
 
 
 @router.get("/users")

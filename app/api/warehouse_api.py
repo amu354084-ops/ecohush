@@ -17,7 +17,7 @@ class WarehouseOperationRequest(BaseModel):
     item_id: int
     warehouse_id: int
     qty: Decimal = Field(gt=0)
-    cost: Decimal = Field(ge=0)
+    cost: Decimal = Field(gt=0)
     sale_price: Decimal | None = Field(default=None, ge=0)
     comment: str | None = None
 

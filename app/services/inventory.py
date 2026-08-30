@@ -96,8 +96,8 @@ async def create_batch(
     qty: Decimal,
     sale_price: Decimal | None = None,
 ) -> Batch:
-    if purchase_cost < 0:
-        raise ValueError("Purchase cost must be non-negative")
+    if purchase_cost <= 0:
+        raise ValueError("Себестоимость партии обязательна и должна быть больше нуля")
     if qty <= 0:
         raise ValueError("Batch quantity must be positive")
     if sale_price is not None and sale_price < 0:
@@ -111,7 +111,7 @@ async def create_batch(
         item_id=item_id,
         warehouse_id=warehouse_id,
         purchase_cost=purchase_cost,
-        sale_price=sale_price if sale_price is not None else item.price,
+        sale_price=sale_price if sale_price is not None else Decimal("0"),
         initial_qty=qty,
         remaining_qty=qty,
     )

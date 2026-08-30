@@ -31,6 +31,7 @@ FIELD_LABELS = {
     "min_stock": "Минимальный остаток",
     "price": "Цена",
     "purchase_cost": "Закупочная цена",
+    "sale_price": "Цена продажи партии",
     "initial_qty": "Начальное количество",
     "remaining_qty": "Остаток",
     "warehouse_id": "Склад",
@@ -139,17 +140,22 @@ def export_database_to_excel(database_path: Path, output_directory: Path) -> Pat
     output_path = output_directory / EXCEL_FILENAME
 
     with sqlite3.connect(database_path) as connection:
+        batch_columns = {
+            row[1] for row in connection.execute('PRAGMA table_info("batches")')
+        }
+        sale_price_column = "b.sale_price" if "sale_price" in batch_columns else "NULL"
         warehouse = _read_query(
             connection,
             """
-            SELECT i.id AS item_id, i.code, i.name, i.type, i.unit, i.min_stock, i.price,
-                   b.id AS batch_id, b.purchase_cost, b.initial_qty, b.remaining_qty,
+                     SELECT i.id AS item_id, i.code, i.name, i.type, i.unit, i.min_stock,
+                         b.id AS batch_id, b.purchase_cost, {sale_price_column} AS sale_price,
+                         b.initial_qty, b.remaining_qty,
                    b.created_at AS batch_created_at, w.id AS warehouse_id, w.name AS warehouse_name
             FROM items i
             LEFT JOIN batches b ON b.item_id = i.id
             LEFT JOIN warehouses w ON w.id = b.warehouse_id
             ORDER BY i.name, w.name, b.id
-            """,
+            """.format(sale_price_column=sale_price_column),
         )
         stock_transactions = _read_query(
             connection,

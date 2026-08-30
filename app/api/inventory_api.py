@@ -21,14 +21,14 @@ from app.api.auth_dependencies import require_roles, require_section
 class CreateBatchRequest(BaseModel):
     item_id: int
     warehouse_id: int
-    purchase_cost: Decimal = Field(ge=0)
+    purchase_cost: Decimal = Field(gt=0)
     sale_price: Decimal = Field(ge=0)
     qty: Decimal = Field(gt=0)
 
 
 class UpdateBatchPricesRequest(BaseModel):
-    purchase_cost: Decimal = Field(ge=0)
-    sale_price: Decimal = Field(ge=0)
+    purchase_cost: Decimal | None = Field(default=None, gt=0)
+    sale_price: Decimal | None = Field(default=None, ge=0)
 
 
 class WarehouseResponse(BaseModel):
@@ -59,6 +59,8 @@ class ItemResponse(BaseModel):
     unit: str
     min_stock: int
     price: str
+    purchase_cost: str = "0"
+    sale_price: str = "0"
 
 
 class BatchResponse(BaseModel):
@@ -104,8 +106,16 @@ async def read_warehouses(_: User = Depends(require_section("warehouse")), sessi
 
 @router.get("/items", response_model=list[ItemResponse])
 async def read_items(_: User = Depends(require_section("warehouse")), session: AsyncSession = session_dependency) -> list[ItemResponse]:
-    result = await session.execute(select(Item))
+    result = await session.execute(
+        select(Item).options(selectinload(Item.batches))
+    )
     items = result.scalars().all()
+    def active_batch(item: Item) -> Batch | None:
+        return max(
+            (batch for batch in item.batches if batch.remaining_qty > 0),
+            key=lambda batch: (batch.created_at, batch.id),
+            default=None,
+        )
     return [
         ItemResponse(
             id=i.id,
@@ -115,7 +125,9 @@ async def read_items(_: User = Depends(require_section("warehouse")), session: A
             type_code=i.type.value,
             unit=i.unit,
             min_stock=i.min_stock,
-            price=str(i.price),
+            price=str(batch.sale_price if (batch := active_batch(i)) else i.price),
+            purchase_cost=str(batch.purchase_cost if batch else 0),
+            sale_price=str(batch.sale_price if batch else i.price),
         )
         for i in items
     ]
@@ -236,8 +248,9 @@ async def update_batch_prices(
     batch = await session.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="Партия не найдена")
-    batch.purchase_cost = request.purchase_cost
-    batch.sale_price = request.sale_price
+    if request.sale_price is not None:
+        batch.sale_price = request.sale_price
+    # purchase_cost is immutable once the batch is created; ignore any attempted update.
     await session.commit()
     await session.refresh(batch)
     return BatchResponse(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -120,7 +120,7 @@ def schedule_google_sheets(scheduler: AsyncIOScheduler) -> None:
         minutes=minutes,
         id="google-sheets-reports-sync",
         replace_existing=True,
-        next_run_time=datetime.now(timezone.utc),
+        next_run_time=datetime.now(get_app_timezone()),
         coalesce=True,
         max_instances=1,
     )
