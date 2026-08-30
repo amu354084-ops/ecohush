@@ -1,3 +1,5 @@
+FROM postgres:16-alpine AS pgclient
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -8,11 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
   ERP_SERVER_PORT=1833
 
 COPY requirements.txt ./requirements.txt
-RUN apt-get update && \
-  apt-get install -y --no-install-recommends postgresql-client && \
-  rm -rf /var/lib/apt/lists/* && \
-  pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip && \
   pip install --no-cache-dir -r requirements.txt
+
+COPY --from=pgclient /usr/local/bin/pg_dump /usr/local/bin/pg_dump
+COPY --from=pgclient /usr/local/lib/postgresql /usr/local/lib/postgresql
 
 COPY app ./app
 COPY alembic ./alembic

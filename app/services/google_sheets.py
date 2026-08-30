@@ -10,6 +10,8 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.services.timezone import get_app_timezone
+
 
 logger = logging.getLogger(__name__)
 

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth_dependencies import require_section
 from app.db import async_session
 from app.services.dashboard import build_dashboard_summary
+from app.services.timezone import get_app_timezone
 
 
 async def get_session() -> AsyncSession:

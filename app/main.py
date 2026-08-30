@@ -86,7 +86,7 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith("/api/") or request.url.path.startswith("/static") or request.url.path == "/":
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
