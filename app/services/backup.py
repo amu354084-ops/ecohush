@@ -77,11 +77,17 @@ def create_database_backup() -> dict[str, Any]:
         parsed = urlsplit(dump_url)
         if not parsed.hostname or not parsed.username or parsed.password is None:
             raise RuntimeError("DATABASE_URL для PostgreSQL должен содержать host, user и password")
+
         host = parsed.hostname
         port = parsed.port or 5432
         database = parsed.path.lstrip("/")
-        escaped_password = parsed.password.replace("\\", "\\\\").replace(":", "\\:")
-        pgpass_line = f"{host}:{port}:{database}:{parsed.username}:{escaped_password}\n"
+        password = parsed.password
+        username = parsed.username
+        netloc = f"{username}:{password}@{host}:{port}/{database}"
+        pg_url = f"postgresql://{netloc}"
+
+        escaped_password = password.replace("\\", "\\\\").replace(":", "\\:")
+        pgpass_line = f"{host}:{port}:{database}:{username}:{escaped_password}\n"
         pgpass_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".pgpass", delete=False) as pgpass:
@@ -89,7 +95,7 @@ def create_database_backup() -> dict[str, Any]:
                 pgpass_path = Path(pgpass.name)
             pgpass_path.chmod(0o600)
             subprocess.run(
-                ["pg_dump", "--format=custom", "--file", str(target), "--dbname", dump_url.split("@", 1)[-1]],
+                ["pg_dump", "--format=custom", "--file", str(target), pg_url],
                 check=True,
                 capture_output=True,
                 text=True,

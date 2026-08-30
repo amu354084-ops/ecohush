@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 from openpyxl import load_workbook
 
+import app.db as db_module
 from app.services import backup
 
 
@@ -27,6 +28,30 @@ def test_create_local_backup_creates_timestamped_zip(tmp_path, monkeypatch):
         assert "описание_резервной_копии.json" in zip_file.namelist()
         manifest = json.loads(zip_file.read("описание_резервной_копии.json"))
         assert manifest["sha256_базы"] == hashlib.sha256(b"sqlite test database").hexdigest()
+
+
+def test_create_database_backup_uses_postgres_connection_string(tmp_path, monkeypatch):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    monkeypatch.setattr(db_module, "DATABASE_URL", "postgresql+asyncpg://app:StrongDbPassword123!@db:5432/app", raising=False)
+    monkeypatch.setattr(backup, "backup_directory", lambda: backup_dir)
+
+    captured = {}
+
+    def fake_run(cmd, check, capture_output, text, env):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        assert cmd[0] == "pg_dump"
+        return None
+
+    monkeypatch.setattr(backup.subprocess, "run", fake_run)
+
+    result = backup.create_database_backup()
+
+    assert result["filename"].startswith("backup_")
+    assert result["filename"].endswith(".dump")
+    assert "postgresql://app:StrongDbPassword123!@db:5432/app" in captured["cmd"]
+    assert captured["env"]["PGPASSFILE"]
 
 
 def test_create_local_backup_exports_formatted_excel(tmp_path, monkeypatch):
