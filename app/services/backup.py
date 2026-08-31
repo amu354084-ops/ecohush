@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import hashlib
 import json
-import shlex
 import sqlite3
 import subprocess
 import tempfile
@@ -66,71 +65,6 @@ def cleanup_old_backups(directory: Path | None = None) -> int:
     return removed
 
 
-def _run_pg_dump_in_db_container(target: Path, pg_url: str) -> None:
-    project_root = Path(__file__).resolve().parents[2]
-    env_file = project_root / ".env.production"
-    if not env_file.exists():
-        env_file = project_root / ".env"
-    compose_file = project_root / "docker-compose.prod.yml"
-
-    if not env_file.exists():
-        raise RuntimeError("Не найден .env.production или .env для docker compose")
-    if not compose_file.exists():
-        raise RuntimeError("Не найден docker-compose.prod.yml")
-
-    exec_cmd = [
-        "docker",
-        "compose",
-        "--env-file",
-        str(env_file),
-        "-f",
-        str(compose_file),
-        "exec",
-        "-T",
-        "db",
-        "bash",
-        "-lc",
-        f"pg_dump --format=custom --file=/tmp/{target.name} {shlex.quote(pg_url)}",
-    ]
-
-    try:
-        subprocess.run(exec_cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() or exc.stdout.strip() or "unknown error"
-        raise RuntimeError(f"pg_dump в контейнере db завершился с ошибкой: {stderr}") from exc
-
-    container_id = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "--env-file",
-            str(env_file),
-            "-f",
-            str(compose_file),
-            "ps",
-            "-q",
-            "db",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    if not container_id:
-        raise RuntimeError("Контейнер db не найден")
-
-    try:
-        subprocess.run(
-            ["docker", "cp", f"{container_id}:/tmp/{target.name}", str(target)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() or exc.stdout.strip() or "unknown error"
-        raise RuntimeError(f"Не удалось скопировать dump из контейнера db: {stderr}") from exc
-
-
 def create_database_backup() -> dict[str, Any]:
     target_directory = backup_directory()
     target_directory.mkdir(parents=True, exist_ok=True)
@@ -149,7 +83,8 @@ def create_database_backup() -> dict[str, Any]:
         database = parsed.path.lstrip("/")
         password = parsed.password
         username = parsed.username
-        pg_url = f"postgresql://{username}:{password}@{host}:{port}/{database}"
+        netloc = f"{username}:{password}@{host}:{port}/{database}"
+        pg_url = f"postgresql://{netloc}"
 
         escaped_password = password.replace("\\", "\\\\").replace(":", "\\:")
         pgpass_line = f"{host}:{port}:{database}:{username}:{escaped_password}\n"
@@ -159,19 +94,17 @@ def create_database_backup() -> dict[str, Any]:
                 pgpass.write(pgpass_line)
                 pgpass_path = Path(pgpass.name)
             pgpass_path.chmod(0o600)
-            try:
-                subprocess.run(
-                    ["pg_dump", "--format=custom", "--file", str(target), pg_url],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    env={**os.environ, "PGPASSFILE": str(pgpass_path)},
-                )
-            except FileNotFoundError:
-                _run_pg_dump_in_db_container(target, pg_url)
+            subprocess.run(
+                ["pg_dump", "--format=custom", "--file", str(target), pg_url],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PGPASSFILE": str(pgpass_path)},
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("pg_dump не найден. Установите postgresql-client на сервере.") from exc
         except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.strip() if isinstance(exc.stderr, str) else str(exc.stderr)
-            raise RuntimeError(f"Не удалось создать резервную копию PostgreSQL: {stderr}") from exc
+            raise RuntimeError(f"Не удалось создать резервную копию PostgreSQL: {exc.stderr.strip()}") from exc
         finally:
             if pgpass_path and pgpass_path.exists():
                 pgpass_path.unlink()
