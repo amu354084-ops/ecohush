@@ -1068,13 +1068,18 @@ async function loadReports() {
   if (dateFrom) productParams.set('date_from', dateFrom);
   if (dateTo) productParams.set('date_to', dateTo);
   const productReport = await fetchJson(`/api/v1/reports/products-sold?${productParams.toString()}`);
+  const productRows = productReport?.detail ? [] : productReport;
+  const productTotal = productRows.reduce((total, row) => total + Number(row.total_sales || 0), 0);
   renderTable('products-sold-table', [
     { key: 'item_name', label: 'Товар' },
     { key: 'item_code', label: 'Код' },
     { key: 'quantity_sold', label: 'Продано' },
     { key: 'unit', label: 'Ед.' },
     { key: 'sales_count', label: 'Продаж' },
-  ], productReport?.detail ? [] : productReport);
+    { key: 'gross_sales', label: 'До скидки' },
+    { key: 'discount_amount', label: 'Скидка' },
+    { key: 'total_sales', label: 'Сумма продажи' },
+  ], [...productRows, { item_name: 'ИТОГО за период', total_sales: productTotal.toFixed(2) }]);
 }
 
 function getSalesChartSeries(rangeDays = 7) {

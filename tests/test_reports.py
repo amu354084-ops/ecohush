@@ -9,9 +9,12 @@ from app.models.schema import (
     PayrollPenalty,
     Sale,
     SaleItem,
+    Item,
+    ItemType,
     User,
 )
 from app.services.reports import build_pnl_summary
+from app.api.reports_api import products_sold_report
 
 
 @pytest.mark.asyncio
@@ -38,6 +41,28 @@ async def test_pnl_rows(session):
     assert summary["markup"] == Decimal("150.00")
     assert summary["overheads"] == Decimal("50.00")
     assert summary["profit"] == Decimal("70.00")
+
+
+@pytest.mark.asyncio
+async def test_products_sold_report_sorts_by_discounted_total(session):
+    first_item = Item(code="A", name="Товар A", type=ItemType.FINAL, unit="шт")
+    second_item = Item(code="B", name="Товар B", type=ItemType.FINAL, unit="шт")
+    first = Sale(total_amount=Decimal("180.00"), paid_amount=Decimal("180.00"), debt_amount=Decimal("0.00"))
+    second = Sale(total_amount=Decimal("100.00"), paid_amount=Decimal("100.00"), debt_amount=Decimal("0.00"))
+    session.add_all([
+        first_item,
+        second_item,
+        first,
+        second,
+        SaleItem(sale=first, item=first_item, item_id=None, batch_id=1, qty=Decimal("2"), unit_price=Decimal("100"), cost_price=Decimal("40"), discount_percent=Decimal("10")),
+        SaleItem(sale=second, item=second_item, item_id=None, batch_id=2, qty=Decimal("1"), unit_price=Decimal("100"), cost_price=Decimal("40")),
+    ])
+    await session.commit()
+
+    rows = await products_sold_report(session=session)
+
+    assert rows[0]["total_sales"] == "180.00"
+    assert rows[0]["discount_amount"] == "20.00"
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from decimal import Decimal
 from io import BytesIO
 from typing import Any
 
@@ -40,6 +41,61 @@ def _excel_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+async def _products_sold_rows(
+    session: AsyncSession,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict[str, Any]]:
+    stmt = (
+        select(
+            Item.id.label("item_id"),
+            Item.name.label("item_name"),
+            Item.code.label("item_code"),
+            Item.unit.label("unit"),
+            func.sum(SaleItem.qty).label("quantity_sold"),
+            func.count(func.distinct(SaleItem.sale_id)).label("sales_count"),
+            func.sum(SaleItem.qty * SaleItem.unit_price).label("gross_sales"),
+            func.sum(SaleItem.qty * SaleItem.unit_price * SaleItem.discount_percent / 100).label("discount_amount"),
+        )
+        .join(SaleItem, SaleItem.item_id == Item.id)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .group_by(Item.id, Item.name, Item.code, Item.unit)
+    )
+    if date_from:
+        stmt = stmt.where(Sale.created_at >= _period_datetime(date_from, time.min))
+    if date_to:
+        stmt = stmt.where(Sale.created_at <= _period_datetime(date_to, time.max))
+
+    rows = []
+    for row in (await session.execute(stmt)).all():
+        quantity = Decimal(str(row.quantity_sold or 0))
+        gross_sales = Decimal(str(row.gross_sales or 0))
+        discount_amount = Decimal(str(row.discount_amount or 0))
+        net_sales = (gross_sales - discount_amount).quantize(Decimal("0.01"))
+        rows.append({
+            "item_id": row.item_id,
+            "item_name": row.item_name,
+            "item_code": row.item_code,
+            "unit": row.unit,
+            "quantity_sold": quantity,
+            "sales_count": int(row.sales_count or 0),
+            "gross_sales": gross_sales.quantize(Decimal("0.01")),
+            "discount_amount": discount_amount.quantize(Decimal("0.01")),
+            "total_sales": net_sales,
+        })
+    return sorted(rows, key=lambda item: (-item["total_sales"], item["item_name"], item["item_id"]))
+
+
+def _products_sold_total(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "item_name": "ИТОГО за период",
+        "quantity_sold": sum((row["quantity_sold"] for row in rows), Decimal("0")),
+        "gross_sales": sum((row["gross_sales"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
+        "discount_amount": sum((row["discount_amount"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
+        "total_sales": sum((row["total_sales"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
+    }
 
 
 async def build_report_sections(
@@ -163,9 +219,11 @@ async def build_report_sections(
         "Общий счет компании": float(summary["company_balance"]),
         "Прибыль": float(summary["profit"]),
     }]
+    product_rows = await _products_sold_rows(session, date_from, date_to)
     return {
         "Продажи": _excel_safe_rows(sales_rows),
         "Состав продаж": sale_items_rows,
+        "Продажи по товарам": _excel_safe_rows(product_rows + [_products_sold_total(product_rows)]),
         "Накладные расходы": _excel_safe_rows(overheads_rows),
         "Зарплата": payroll_rows,
         "Штрафы": _excel_safe_rows(penalties_rows),
@@ -196,35 +254,16 @@ async def products_sold_report(
     date_to: date | None = None,
     session: AsyncSession = session_dependency,
 ) -> list[dict[str, Any]]:
-    stmt = (
-        select(
-            Item.id.label("item_id"),
-            Item.name.label("item_name"),
-            Item.code.label("item_code"),
-            Item.unit.label("unit"),
-            func.sum(SaleItem.qty).label("quantity_sold"),
-            func.count(func.distinct(SaleItem.sale_id)).label("sales_count"),
-        )
-        .join(SaleItem, SaleItem.item_id == Item.id)
-        .join(Sale, Sale.id == SaleItem.sale_id)
-        .group_by(Item.id, Item.name, Item.code, Item.unit)
-        .order_by(Item.name, Item.id)
-    )
-    if date_from:
-        stmt = stmt.where(Sale.created_at >= _period_datetime(date_from, time.min))
-    if date_to:
-        stmt = stmt.where(Sale.created_at <= _period_datetime(date_to, time.max))
-    rows = (await session.execute(stmt)).all()
+    rows = await _products_sold_rows(session, date_from, date_to)
     return [
         {
-            "item_id": item_id,
-            "item_name": item_name,
-            "item_code": item_code,
-            "unit": unit,
-            "quantity_sold": str(quantity_sold or 0),
-            "sales_count": int(sales_count or 0),
+            **row,
+            "quantity_sold": str(row["quantity_sold"]),
+            "gross_sales": str(row["gross_sales"]),
+            "discount_amount": str(row["discount_amount"]),
+            "total_sales": str(row["total_sales"]),
         }
-        for item_id, item_name, item_code, unit, quantity_sold, sales_count in rows
+        for row in rows
     ]
 
 
