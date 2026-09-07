@@ -69,6 +69,7 @@ class Order(Base):
     invoice_number: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
     courier_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("counterparties.id"), nullable=True)
+    referred_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[OrderStatus] = mapped_column(String(32), nullable=False, default=OrderStatus.PENDING)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal(0))

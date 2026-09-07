@@ -21,17 +21,22 @@ SECTION_DEFAULT_ROLES = {
     "reports": {"ADMIN"}, "formula": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"}, "debts": {"ADMIN"},
     "users": {"ADMIN"}, "settings": {"ADMIN"}, "backup": {"ADMIN"},
 }
+ACTION_PERMISSIONS = {
+    "orders_edit", "orders_delete", "orders_edit_delivered", "clients_edit",
+    "items_edit", "batches_edit", "formula_edit",
+}
+ALL_PERMISSIONS = set(SECTION_DEFAULT_ROLES) | ACTION_PERMISSIONS
 
 
 def user_permissions(user: User) -> set[str]:
     if user.role == "ADMIN":
-        return set(SECTION_DEFAULT_ROLES)
+        return ALL_PERMISSIONS.copy()
     permissions_value = getattr(user, "permissions", None)
     if permissions_value:
         try:
             permissions = json.loads(permissions_value)
             if isinstance(permissions, list):
-                return {item for item in permissions if item in SECTION_DEFAULT_ROLES}
+                return {item for item in permissions if item in ALL_PERMISSIONS}
         except (TypeError, ValueError):
             pass
     return {section for section, roles in SECTION_DEFAULT_ROLES.items() if user.role in roles}

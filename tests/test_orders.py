@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -18,7 +19,8 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.inventory import create_batch
-from app.services.orders import accept_order, create_order, renumber_invoice_numbers, transition_order
+from app.services.orders import accept_order, create_order, delete_order, renumber_invoice_numbers, transition_order, update_order
+from app.services.invoice import invoice_html
 
 
 @pytest.mark.asyncio
@@ -136,3 +138,68 @@ async def test_existing_invoice_numbers_are_renumbered_globally():
         assert second.invoice_number == "20260826-0002"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_order_can_be_updated_before_acceptance_and_deleted_only_before_acceptance():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        courier = User(username="edit-courier", password_hash="test", role="COURIER")
+        first_client = Counterparty(name="First Client")
+        second_client = Counterparty(name="Second Client")
+        item = Item(code="EDIT-1", name="Editable Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, first_client, second_client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+        order = await create_order(session, courier.id, first_client.id, [{"item_id": item.id, "quantity": 2, "discount_percent": 0}], "Первый источник")
+        await update_order(session, order.id, second_client.id, [{"item_id": item.id, "quantity": 1, "discount_percent": 10}], "Чалбкунанnda")
+        await session.refresh(order, attribute_names=["items"])
+        assert order.client_id == second_client.id
+        assert order.referred_by == "Чалбкунанnda"
+        assert order.items[0].quantity == Decimal("1.0000")
+        assert order.items[0].discount == Decimal("1.00")
+        await delete_order(session, order.id)
+        assert await session.get(Order, order.id) is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_accepted_order_cannot_be_deleted():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        courier = User(username="delete-courier", password_hash="test", role="COURIER")
+        client = Counterparty(name="Delete Client")
+        item = Item(code="DELETE-1", name="Delete Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+        order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 1}])
+        await accept_order(session, order.id)
+        with pytest.raises(ValueError, match="Удалять можно только"):
+            await delete_order(session, order.id)
+    await engine.dispose()
+
+
+def test_order_invoice_subtracts_item_and_order_discounts_from_total():
+    item = SimpleNamespace(name="Product", unit="pcs")
+    order = SimpleNamespace(
+        invoice_number="20260906-0001",
+        id=1,
+        created_at=datetime(2026, 9, 6, 12, 0),
+        status=OrderStatus.DELIVERED,
+        client=SimpleNamespace(name="Client"),
+        courier=SimpleNamespace(full_name="Courier", username="courier"),
+        discount_amount=Decimal("10.00"),
+        items=[SimpleNamespace(item=item, quantity=Decimal("2"), price=Decimal("100"), discount=Decimal("5"))],
+    )
+    html = invoice_html(order)
+    assert "<th>200.00</th><th>15.00</th><th>185.00</th>" in html
+    assert "на сумму 185.00 сомони" in html

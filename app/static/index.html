@@ -2195,6 +2195,8 @@
           <div class="card" id="courier-order-panel">
             <h3>Новая заявка</h3>
             <div class="field"><label>Клиент</label><select id="order-client"></select></div>
+            <div class="field"><label>Кто дал клиента</label><input id="order-referred-by" maxlength="255"
+                placeholder="Например: Чалбкунанnda" /></div>
             <div id="order-lines" class="row-stack"></div>
             <div class="status-box" id="order-total-summary">Общая сумма заказа: 0.00 сом</div>
             <button id="add-order-line" class="button-second" type="button">Добавить товар</button>
@@ -2221,6 +2223,8 @@
           <h3>Должники</h3>
           <div class="field"><label>Поиск по имени или телефону</label><input id="debt-search"
               placeholder="Имя или номер телефона"></div>
+          <div class="field"><label>Должники на дату</label><input id="debt-as-of" type="date"></div>
+          <div class="status-box" id="debts-summary">Загрузка итогов...</div>
           <table class="table" id="debts-table"></table>
           <div class="card debt-details" id="debt-details" style="display:none;">
             <h4 id="debt-details-title">История долга</h4>
@@ -2258,6 +2262,11 @@
                 <label class="permission-option"><input type="checkbox" value="finance"> Финансы</label>
                 <label class="permission-option"><input type="checkbox" value="dashboard"> Дашборд</label>
                 <label class="permission-option"><input type="checkbox" value="formula"> Формулы</label>
+                <label class="permission-option"><input type="checkbox" value="orders_edit"> Изменять заявки</label>
+                <label class="permission-option"><input type="checkbox" value="orders_delete"> Удалять заявки</label>
+                <label class="permission-option"><input type="checkbox" value="clients_edit"> Изменять клиентов</label>
+                <label class="permission-option"><input type="checkbox" value="items_edit"> Изменять товары</label>
+                <label class="permission-option"><input type="checkbox" value="batches_edit"> Изменять партии</label>
                 <label class="permission-option"><input type="checkbox" value="reports"> Отчёты</label>
                 <label class="permission-option"><input type="checkbox" value="debts"> Должники</label>
                 <label class="permission-option"><input type="checkbox" value="settings"> Настройки</label>
@@ -2399,6 +2408,10 @@
           <div>
             <table class="table" id="report-summary-table"></table>
           </div>
+        </div>
+        <div class="card" style="margin-top:18px;">
+          <h4>Продажи по товарам</h4>
+          <table class="table" id="products-sold-table"></table>
         </div>
       </div>
     </section>

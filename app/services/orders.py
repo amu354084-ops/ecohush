@@ -5,7 +5,7 @@ from decimal import Decimal
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
@@ -29,6 +29,7 @@ async def create_order(
     courier_id: int,
     client_id: int,
     items: list[dict[str, Any]],
+    referred_by: str | None = None,
 ) -> Order:
     if not items:
         raise ValueError("At least one order item is required")
@@ -39,7 +40,12 @@ async def create_order(
     if client is None:
         raise ValueError("Client not found")
 
-    order = Order(courier_id=courier_id, client_id=client_id, status=OrderStatus.PENDING)
+    order = Order(
+        courier_id=courier_id,
+        client_id=client_id,
+        referred_by=(referred_by or "").strip() or None,
+        status=OrderStatus.PENDING,
+    )
     session.add(order)
     await session.flush()
     for item_data in items:
@@ -75,6 +81,62 @@ async def create_order(
     await session.flush()
     await session.refresh(order)
     return order
+
+
+async def update_order(
+    session: AsyncSession,
+    order_id: int,
+    client_id: int,
+    items: list[dict[str, Any]],
+    referred_by: str | None = None,
+) -> Order:
+    order = await _get_order(session, order_id)
+    if order.status not in {OrderStatus.PENDING, OrderStatus.ACCEPTED, OrderStatus.REJECTED}:
+        raise ValueError("Заявку можно изменять только до передачи в путь")
+    client = await session.get(Counterparty, client_id)
+    if client is None:
+        raise ValueError("Client not found")
+    if not items:
+        raise ValueError("At least one order item is required")
+    order.client_id = client_id
+    order.referred_by = (referred_by or "").strip() or None
+    order.rejection_reason = None
+    await session.execute(delete(OrderItem).where(OrderItem.order_id == order.id))
+    for item_data in items:
+        item = await session.get(Item, int(item_data["item_id"]))
+        if item is None:
+            raise ValueError("Item not found")
+        quantity = Decimal(item_data["quantity"])
+        price = await session.scalar(
+            select(Batch.sale_price).where(
+                Batch.item_id == item.id,
+                Batch.warehouse_id == WarehouseType.FINISHED,
+                Batch.remaining_qty > 0,
+                Batch.sale_price > 0,
+            ).order_by(Batch.created_at.asc(), Batch.id.asc())
+        )
+        if price is None:
+            raise ValueError("Для товара нет активной партии с ценой продажи")
+        discount_percent = item_data.get("discount_percent")
+        if discount_percent is not None:
+            discount = (quantity * price * Decimal(discount_percent) / Decimal("100")).quantize(Decimal("0.01"))
+        else:
+            discount = Decimal(item_data.get("discount", 0) or 0)
+        if quantity <= 0 or discount < 0 or discount > quantity * price:
+            raise ValueError("Некорректное количество или скидка")
+        session.add(OrderItem(order_id=order.id, item_id=item.id, quantity=quantity, price=price, discount=discount))
+    if order.status == OrderStatus.REJECTED:
+        order.status = OrderStatus.PENDING
+    await session.flush()
+    return order
+
+
+async def delete_order(session: AsyncSession, order_id: int) -> None:
+    order = await _get_order(session, order_id)
+    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED}:
+        raise ValueError("Удалять можно только заявку до одобрения")
+    await session.delete(order)
+    await session.flush()
 
 
 async def accept_order(session: AsyncSession, order_id: int, discount_amount: Decimal = Decimal(0)) -> Order:

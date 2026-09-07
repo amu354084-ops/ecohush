@@ -216,6 +216,8 @@ function populateWarehouseFilter() {
   filter.innerHTML = defaultOption + options;
   if (window.warehouseList?.some((warehouse) => String(warehouse.id) === selectedValue)) {
     filter.value = selectedValue;
+  } else if (window.warehouseList?.some((warehouse) => String(warehouse.id) === '3')) {
+    filter.value = '3';
   }
 }
 
@@ -505,6 +507,7 @@ async function loadOrders(status = state.orderStatus) {
   tabs.innerHTML = statuses.map(([key, label]) => `<button type="button" class="order-tab ${key === status ? 'active' : ''}" data-order-status="${key}">${label}</button>`).join('');
   tabs.querySelectorAll('[data-order-status]').forEach((button) => button.addEventListener('click', () => loadOrders(button.dataset.orderStatus)));
   if (data?.detail) { list.innerHTML = `<div class="status-box error">${escapeHtml(data.detail)}</div>`; return; }
+  window.orderCache = Object.fromEntries((data || []).map((order) => [String(order.id), order]));
   list.innerHTML = (data || []).map((order) => {
     const items = (order.items || []).map((item) => {
       const lineSubtotal = Number(item.quantity || 0) * Number(item.price || 0);
@@ -513,7 +516,10 @@ async function loadOrders(status = state.orderStatus) {
       return `${escapeHtml(item.name)}: ${escapeHtml(item.quantity)} ${escapeHtml(item.unit || '')} x ${escapeHtml(item.price)}${discountLabel}`;
     }).join('<br>');
     const orderTotal = Math.max(0, (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0) - Number(item.discount || 0), 0) - Number(order.discount_amount || 0));
-    return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">В путь</button>` : ''}</div></article>`;
+    const permissions = (() => { try { return JSON.parse(sessionStorage.getItem('erp_permissions') || '[]'); } catch { return []; } })();
+    const canEdit = ['PENDING', 'REJECTED'].includes(order.status) || permissions.includes('orders_edit');
+    const canDelete = ['PENDING', 'REJECTED'].includes(order.status) || permissions.includes('orders_delete');
+    return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Кто дал клиента: ${escapeHtml(order.referred_by || 'не указан')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${canEdit ? `<button type="button" class="button-second edit-order" data-order-id="${escapeHtml(order.id)}">Изменить</button>` : ''}${canDelete ? `<button type="button" class="button-second delete-order" data-order-id="${escapeHtml(order.id)}">Удалить</button>` : ''}${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">В путь</button>` : ''}</div></article>`;
   }).join('') || '<div class="status-box">Заявок нет.</div>';
   const pagination = document.getElementById('orders-pagination');
   const previous = document.getElementById('orders-prev');
@@ -537,6 +543,22 @@ async function loadOrders(status = state.orderStatus) {
   list.querySelectorAll('.reject-order').forEach((button) => button.addEventListener('click', async () => { const reason = prompt('Причина отклонения:'); if (!reason) return; const result = await orderRequest(`/api/v1/orders/${button.dataset.orderId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); if (result.detail) showToast(result.detail); else loadOrders(); }));
   list.querySelectorAll('.transit-order').forEach((button) => button.addEventListener('click', async () => { const result = await orderRequest(`/api/v1/orders/${button.dataset.orderId}/transition`, { method: 'POST', body: JSON.stringify({ status: 'IN_TRANSIT' }) }); if (result.detail) showToast(result.detail); else loadOrders(); }));
   list.querySelectorAll('.deliver-order').forEach((button) => button.addEventListener('click', () => openDeliveryModal(button.dataset.orderId, Number(button.dataset.orderTotal || 0))));
+  list.querySelectorAll('.delete-order').forEach((button) => button.addEventListener('click', async () => {
+    if (!window.confirm('Удалить заявку?')) return;
+    const result = await orderRequest(`/api/v1/orders/${button.dataset.orderId}`, { method: 'DELETE' });
+    if (result.detail) showToast(result.detail); else loadOrders();
+  }));
+  list.querySelectorAll('.edit-order').forEach((button) => button.addEventListener('click', () => {
+    const order = window.orderCache?.[button.dataset.orderId];
+    if (!order) return;
+    window.editingOrderId = order.id;
+    document.getElementById('order-client').value = [...document.querySelectorAll('#order-client option')].find((option) => option.textContent.startsWith(order.client_name))?.value || '';
+    document.getElementById('order-referred-by').value = order.referred_by || '';
+    document.getElementById('order-lines').innerHTML = '';
+    (order.items || []).forEach((item) => { addOrderLine(); const line = document.querySelector('#order-lines .order-line:last-child'); line.querySelector('.order-product').value = item.item_id; line.querySelector('.order-quantity').value = item.quantity; line.querySelector('.order-discount').value = item.price ? (Number(item.discount || 0) / (Number(item.quantity) * Number(item.price)) * 100).toFixed(2) : 0; line.querySelector('.order-product').dispatchEvent(new Event('change')); });
+    document.getElementById('create-order').textContent = 'Сохранить изменения';
+    document.getElementById('order-client').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
 }
 
 let deliveryOrderId = null;
@@ -558,8 +580,14 @@ function updateDeliveryDebtPreview() {
 }
 
 async function loadDebts(query = '') {
-  const data = await fetchJson(`/api/v1/clients/list?limit=500&q=${encodeURIComponent(query)}`);
+  const asOf = document.getElementById('debt-as-of')?.value || '';
+  const params = new URLSearchParams({ limit: '500', q: query });
+  if (asOf) params.set('as_of', asOf);
+  const data = await fetchJson(`/api/v1/clients/list?${params.toString()}`);
   const debtClients = (data || []).filter((client) => Number(client.current_debt) > 0);
+  const totalDebt = debtClients.reduce((sum, client) => sum + Number(client.current_debt || 0), 0);
+  const summary = document.getElementById('debts-summary');
+  if (summary) summary.textContent = `Должников: ${debtClients.length} | Общая сумма: ${formatMoney(totalDebt)}${asOf ? ` | На дату: ${asOf}` : ''}`;
   renderTable('debts-table', [{ key: 'name', label: 'Клиент' }, { key: 'phone', label: 'Телефон' }, { key: 'current_debt', label: 'Долг' }], debtClients);
   document.querySelectorAll('#debts-table tr').forEach((row, index) => { if (index > 0) { row.classList.add('debt-row'); row.addEventListener('click', () => loadDebtDetails(debtClients[index - 1].name)); } });
 }
@@ -630,8 +658,9 @@ async function loadUsers() {
     const user = (data || []).find((item) => String(item.id) === row.dataset.userId);
     if (!user || user.role === 'ADMIN') return;
     const cell = row.cells[4];
-    const availablePermissions = Object.entries(sectionLabels).filter(([key]) => !['users', 'backup'].includes(key));
-    const selectedCount = (user.permissions || []).filter((permission) => sectionLabels[permission]).length;
+    const actionLabels = { orders_edit: 'Изменение заявок', orders_delete: 'Удаление заявок', orders_edit_delivered: 'Операции с доставленными', clients_edit: 'Изменение клиентов', items_edit: 'Изменение товаров', batches_edit: 'Изменение партий', formula_edit: 'Изменение формул' };
+    const availablePermissions = Object.entries(sectionLabels).filter(([key]) => !['users', 'backup'].includes(key)).concat(Object.entries(actionLabels));
+    const selectedCount = (user.permissions || []).length;
     cell.innerHTML = `<details class="user-access-menu"><summary>Доступы (${selectedCount})</summary><div class="user-access-list">${availablePermissions.map(([key, label]) => `<label><input type="checkbox" class="user-permission" data-user-id="${user.id}" data-permission="${key}" ${(user.permissions || []).includes(key) ? 'checked' : ''}>${escapeHtml(label)}</label>`).join('')}</div></details>`;
   });
   document.querySelectorAll('.user-permission').forEach((checkbox) => checkbox.addEventListener('change', async () => {
@@ -661,7 +690,10 @@ function formatMoney(value) {
 
 function renderClientList(clients) {
   const table = document.getElementById('clients-table');
-  if (!table) return;
+  if (!table) {
+    console.error('Clients table not found');
+    return;
+  }
   table.innerHTML = '';
   if (!clients.length) {
     table.innerHTML = '<tr><td class="clients-empty">Клиенты не найдены.</td></tr>';
@@ -683,7 +715,13 @@ function renderClientList(clients) {
       cell.textContent = value;
       row.appendChild(cell);
     });
-    row.addEventListener('click', () => loadClientHistory(client.id));
+    row.addEventListener('click', () => {
+      window.editingClientId = client.id;
+      document.getElementById('client-name').value = client.name || '';
+      document.getElementById('client-phone').value = client.phone || '';
+      document.getElementById('create-client').textContent = 'Сохранить изменения';
+      loadClientHistory(client.id);
+    });
     table.appendChild(row);
   });
   const previous = document.getElementById('clients-prev');
@@ -1026,6 +1064,17 @@ async function loadReports() {
     { key: 'profit', label: 'Прибыль' },
   ], [summary]);
   setStatus('report-summary', `${dateFrom || 'Начало учёта'} — ${dateTo || 'сегодня'}. Отчёт обновлён.`, 'success');
+  const productParams = new URLSearchParams();
+  if (dateFrom) productParams.set('date_from', dateFrom);
+  if (dateTo) productParams.set('date_to', dateTo);
+  const productReport = await fetchJson(`/api/v1/reports/products-sold?${productParams.toString()}`);
+  renderTable('products-sold-table', [
+    { key: 'item_name', label: 'Товар' },
+    { key: 'item_code', label: 'Код' },
+    { key: 'quantity_sold', label: 'Продано' },
+    { key: 'unit', label: 'Ед.' },
+    { key: 'sales_count', label: 'Продаж' },
+  ], productReport?.detail ? [] : productReport);
 }
 
 function getSalesChartSeries(rangeDays = 7) {
@@ -1263,7 +1312,9 @@ async function fetchItems() {
 }
 
 function bindItemPriceEditors() {
-  if (sessionStorage.getItem('erp_role') === 'ADMIN') {
+  let permissions = [];
+  try { permissions = JSON.parse(sessionStorage.getItem('erp_permissions') || '[]'); } catch { permissions = []; }
+  if (sessionStorage.getItem('erp_role') === 'ADMIN' || permissions.includes('items_edit')) {
     const rows = Array.from(document.querySelectorAll('#items-table tr')).slice(1);
     rows.forEach((row, index) => {
       const item = window.inventoryItems[index];
@@ -1275,6 +1326,24 @@ function bindItemPriceEditors() {
         if (value === null || Number(value) < 0 || value.trim() === '') return;
         const result = await orderRequest(`/api/v1/inventory/items/${item.id}/price`, { method: 'PATCH', body: JSON.stringify({ price: value }) });
         if (result.detail) showToast(result.detail); else { item.price = result.price; loadOrderForm(); renderWarehouseTables(); }
+      });
+      const nameCell = row.insertCell();
+      nameCell.innerHTML = `<button type="button" class="button-second edit-item-name" data-item-id="${escapeHtml(item.id)}">Изменить имя</button>`;
+      nameCell.querySelector('button').addEventListener('click', async () => {
+        const value = prompt(`Новое имя товара «${item.name}»:`, item.name || '');
+        if (value === null || !value.trim()) return;
+        const result = await orderRequest(`/api/v1/inventory/items/${item.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: value.trim() }),
+        });
+        if (result.detail) {
+          showToast(result.detail);
+          return;
+        }
+        item.name = result.name;
+        await loadOrderForm();
+        renderWarehouseTables();
+        showToast('Имя товара изменено.');
       });
       const deleteCell = row.insertCell();
       deleteCell.innerHTML = `<button type="button" class="button-second delete-item" data-item-id="${escapeHtml(item.id)}">Удалить</button>`;
@@ -1470,13 +1539,28 @@ function syncBatchCost() {
   const itemId = Number(document.getElementById('batch-item-id')?.value || 0);
   const costInput = document.getElementById('batch-cost');
   const salePriceInput = document.getElementById('batch-sale-price');
-  if (!costInput || !salePriceInput || !itemId) return;
-  const item = window.inventoryItems?.find((entry) => entry.id === itemId);
+  if (!costInput || !salePriceInput) return;
+  if (!itemId) {
+    costInput.value = '0';
+    salePriceInput.value = '0';
+    return;
+  }
   const batch = (window.batches || [])
     .filter((entry) => entry.item_id === itemId)
-    .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)))[0];
-  if (costInput.value === '0') costInput.value = Number(batch?.purchase_cost || 0).toFixed(2);
-  if (salePriceInput.value === '0') salePriceInput.value = Number(batch?.sale_price ?? item?.price ?? 0).toFixed(2);
+    .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))[0];
+  costInput.value = batch ? Number(batch.purchase_cost || 0).toFixed(2) : '0';
+  salePriceInput.value = batch ? Number(batch.sale_price || 0).toFixed(2) : '0';
+}
+
+function resetBatchForm() {
+  const itemSelect = document.getElementById('batch-item-id');
+  const warehouseSelect = document.getElementById('batch-warehouse-id');
+  if (itemSelect) itemSelect.selectedIndex = -1;
+  if (warehouseSelect) warehouseSelect.selectedIndex = -1;
+  ['batch-cost', 'batch-sale-price', 'batch-qty'].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.value = '0';
+  });
 }
 
 async function loadCounterpartiesForSales() {
@@ -1735,12 +1819,21 @@ document.addEventListener('DOMContentLoaded', () => {
   bindIfExists('orders-next', () => { state.ordersPage += 1; loadOrders(); });
   bindIfExists('create-order', async () => {
     const items = Array.from(document.querySelectorAll('.order-line')).map((line) => ({ item_id: Number(line.querySelector('.order-product').value), quantity: line.querySelector('.order-quantity').value, price: line.querySelector('.order-price').value, discount_percent: line.querySelector('.order-discount').value || 0 })).filter((item) => item.quantity && item.price !== '');
-    const result = await orderRequest('/api/v1/orders', { method: 'POST', body: JSON.stringify({ client_id: Number(document.getElementById('order-client').value), items }) });
+    const editingId = window.editingOrderId;
+    const result = await orderRequest(editingId ? `/api/v1/orders/${editingId}` : '/api/v1/orders', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify({ client_id: Number(document.getElementById('order-client').value), referred_by: document.getElementById('order-referred-by')?.value || null, items }) });
     setStatus('order-create-status', result.detail || `Заявка №${result.id} создана.`, result.detail ? 'error' : 'success');
-    if (!result.detail) loadOrders('PENDING');
+    if (!result.detail) {
+      window.editingOrderId = null;
+      document.getElementById('create-order').textContent = 'Создать заявку';
+      document.getElementById('order-client').selectedIndex = -1;
+      document.getElementById('order-referred-by').value = '';
+      document.getElementById('order-lines').innerHTML = '';
+      await loadOrders('PENDING');
+    }
   });
   const debtSearch = document.getElementById('debt-search');
   debtSearch?.addEventListener('input', () => loadDebts(debtSearch.value));
+  document.getElementById('debt-as-of')?.addEventListener('change', () => loadDebts(debtSearch?.value || ''));
   bindIfExists('create-user', async () => {
     const permissions = Array.from(document.querySelectorAll('#user-permissions input:checked')).map((input) => input.value);
     const result = await orderRequest('/api/v1/users', { method: 'POST', body: JSON.stringify({ username: document.getElementById('user-username').value, password: document.getElementById('user-password').value, full_name: document.getElementById('user-full-name').value, role: document.getElementById('user-role').value, can_change_status: document.getElementById('user-can-change-status').checked, permissions }) });
@@ -2317,6 +2410,7 @@ document.addEventListener('DOMContentLoaded', () => {
       node.classList.remove('success');
     } else {
       const message = `Партия создана: ${result.id}`;
+      resetBatchForm();
       await loadWarehouseTables();
       node.textContent = message;
       node.classList.add('success');
@@ -2718,8 +2812,9 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus('client-response', 'Введите имя клиента.');
       return;
     }
-    const result = await fetchJson('/api/v1/clients/create', {
-      method: 'POST',
+    const editingId = window.editingClientId;
+    const result = await fetchJson(editingId ? `/api/v1/clients/${editingId}` : '/api/v1/clients/create', {
+      method: editingId ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, phone: phone || null }),
     });
@@ -2729,10 +2824,14 @@ document.addEventListener('DOMContentLoaded', () => {
       node.classList.add('error');
       node.classList.remove('success');
     } else {
-      node.textContent = `Клиент сохранен: ${result.name}`;
+      node.textContent = editingId ? `Данные клиента изменены: ${result.name}` : `Клиент сохранен: ${result.name}`;
       node.classList.add('success');
       node.classList.remove('error');
-      loadClients();
+      window.editingClientId = null;
+      document.getElementById('client-name').value = '';
+      document.getElementById('client-phone').value = '';
+      document.getElementById('create-client').textContent = 'Добавить клиента';
+      await loadClients();
     }
   });
 
@@ -2803,8 +2902,14 @@ document.addEventListener('DOMContentLoaded', () => {
         bomSelect.value = String(savedBomId);
       }
       window.currentFormulaBomId = savedBomId;
-      // load just-saved formula into the form for immediate editing
-      await loadSelectedFormula();
+      if (bomId === 0) {
+        document.getElementById('formula-product-id').selectedIndex = -1;
+        document.getElementById('formula-name').value = '';
+        document.getElementById('formula-item-rows').innerHTML = '';
+        window.currentFormulaBomId = 0;
+      } else {
+        await loadSelectedFormula();
+      }
     }
     if (btn) { btn.disabled = false; btn.textContent = oldText; }
   });

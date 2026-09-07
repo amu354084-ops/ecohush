@@ -51,7 +51,7 @@ async def test_incoming_preserves_explicit_batch_sale_price():
 
 
 @pytest.mark.asyncio
-async def test_batch_sale_price_can_change_without_changing_purchase_cost():
+async def test_batch_prices_can_change_without_changing_batch_quantity():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -67,9 +67,9 @@ async def test_batch_sale_price_can_change_without_changing_purchase_cost():
             UpdateBatchPricesRequest(purchase_cost=Decimal("99.00"), sale_price=Decimal("31.00")),
             session,
         )
-        assert updated.purchase_cost == "17.5000"
+        assert updated.purchase_cost == "99.0000"
         assert updated.sale_price == "31.0000"
-        assert (await session.get(Batch, batch.id)).purchase_cost == Decimal("17.5000")
+        assert (await session.get(Batch, batch.id)).purchase_cost == Decimal("99.0000")
         assert (await session.get(Batch, batch.id)).sale_price == Decimal("31.0000")
     await engine.dispose()
 

@@ -6,12 +6,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_dependencies import require_section
 from app.db import async_session
-from app.models.schema import PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
+from app.models.schema import Item, PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary
 from app.services.google_sheets import sync_report_sections
@@ -187,6 +188,44 @@ async def pnl_summary(
         _period_datetime(date_to, time.max) if date_to else None,
     )
     return {k: str(v) for k, v in summary.items()}
+
+
+@router.get("/products-sold")
+async def products_sold_report(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    session: AsyncSession = session_dependency,
+) -> list[dict[str, Any]]:
+    stmt = (
+        select(
+            Item.id.label("item_id"),
+            Item.name.label("item_name"),
+            Item.code.label("item_code"),
+            Item.unit.label("unit"),
+            func.sum(SaleItem.qty).label("quantity_sold"),
+            func.count(func.distinct(SaleItem.sale_id)).label("sales_count"),
+        )
+        .join(SaleItem, SaleItem.item_id == Item.id)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .group_by(Item.id, Item.name, Item.code, Item.unit)
+        .order_by(Item.name, Item.id)
+    )
+    if date_from:
+        stmt = stmt.where(Sale.created_at >= _period_datetime(date_from, time.min))
+    if date_to:
+        stmt = stmt.where(Sale.created_at <= _period_datetime(date_to, time.max))
+    rows = (await session.execute(stmt)).all()
+    return [
+        {
+            "item_id": item_id,
+            "item_name": item_name,
+            "item_code": item_code,
+            "unit": unit,
+            "quantity_sold": str(quantity_sold or 0),
+            "sales_count": int(sales_count or 0),
+        }
+        for item_id, item_name, item_code, unit, quantity_sold, sales_count in rows
+    ]
 
 
 @router.get("/export_excel")

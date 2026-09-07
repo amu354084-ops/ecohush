@@ -15,14 +15,14 @@ from pydantic import Field
 from decimal import Decimal
 from app.services.inventory import create_batch
 from app.services.localization import display_label
-from app.api.auth_dependencies import require_roles, require_section
+from app.api.auth_dependencies import current_user, require_roles, require_section, user_permissions
 
 
 class CreateBatchRequest(BaseModel):
     item_id: int
     warehouse_id: int
-    purchase_cost: Decimal = Field(gt=0)
-    sale_price: Decimal = Field(ge=0)
+    purchase_cost: Decimal | None = Field(default=None, ge=0)
+    sale_price: Decimal | None = Field(default=None, ge=0)
     qty: Decimal = Field(gt=0)
 
 
@@ -48,6 +48,12 @@ class CreateItemRequest(BaseModel):
 
 class UpdateItemPriceRequest(BaseModel):
     price: Decimal = Field(ge=0)
+
+
+class UpdateItemRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    code: str | None = Field(default=None, min_length=1, max_length=64)
+    price: Decimal | None = Field(default=None, ge=0)
 
 
 class ItemResponse(BaseModel):
@@ -167,11 +173,44 @@ async def update_item_price(
     item_id: int,
     request: UpdateItemPriceRequest,
     session: AsyncSession = session_dependency,
+    user: User = Depends(require_section("warehouse")),
 ) -> ItemResponse:
+    if getattr(user, "role", "ADMIN") != "ADMIN" and "items_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права изменять товары")
     item = await session.get(Item, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Товар не найден")
     item.price = request.price
+    await session.commit()
+    await session.refresh(item)
+    return ItemResponse(
+        id=item.id, code=item.code, name=item.name,
+        type=display_label(item.type.value), type_code=item.type.value,
+        unit=item.unit, min_stock=item.min_stock, price=str(item.price),
+    )
+
+
+@router.patch("/items/{item_id}", response_model=ItemResponse)
+async def update_item(
+    item_id: int,
+    request: UpdateItemRequest,
+    user: User = Depends(current_user),
+    session: AsyncSession = session_dependency,
+) -> ItemResponse:
+    if user.role != "ADMIN" and "items_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права изменять товары")
+    item = await session.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    if request.code is not None:
+        duplicate = await session.scalar(select(Item).where(Item.code == request.code, Item.id != item_id))
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="Товар с таким кодом уже существует")
+        item.code = request.code
+    if request.name is not None:
+        item.name = request.name
+    if request.price is not None:
+        item.price = request.price
     await session.commit()
     await session.refresh(item)
     return ItemResponse(
@@ -238,19 +277,23 @@ async def read_batches(
 @router.patch(
     "/batches/{batch_id}/prices",
     response_model=BatchResponse,
-    dependencies=[Depends(require_roles("ADMIN"))],
+    dependencies=[Depends(require_section("warehouse"))],
 )
 async def update_batch_prices(
     batch_id: int,
     request: UpdateBatchPricesRequest,
     session: AsyncSession = session_dependency,
+    user: User = Depends(current_user),
 ) -> BatchResponse:
+    if getattr(user, "role", "ADMIN") != "ADMIN" and "batches_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права изменять партии")
     batch = await session.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="Партия не найдена")
+    if request.purchase_cost is not None:
+        batch.purchase_cost = request.purchase_cost
     if request.sale_price is not None:
         batch.sale_price = request.sale_price
-    # purchase_cost is immutable once the batch is created; ignore any attempted update.
     await session.commit()
     await session.refresh(batch)
     return BatchResponse(
@@ -295,15 +338,27 @@ async def create_batch_endpoint(
     request: CreateBatchRequest,
     session: AsyncSession = session_dependency,
 ) -> BatchResponse:
-    async with session.begin():
-        batch = await create_batch(
-            session=session,
-            item_id=request.item_id,
-            warehouse_id=request.warehouse_id,
-            purchase_cost=request.purchase_cost,
-            qty=request.qty,
-            sale_price=request.sale_price,
-        )
+    item = await session.get(Item, request.item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    latest_batch = await session.scalar(
+        select(Batch).where(Batch.item_id == request.item_id).order_by(Batch.created_at.desc(), Batch.id.desc())
+    )
+    purchase_cost = request.purchase_cost if request.purchase_cost and request.purchase_cost > 0 else (latest_batch.purchase_cost if latest_batch else None)
+    sale_price = request.sale_price if request.sale_price and request.sale_price > 0 else (
+        latest_batch.sale_price if latest_batch else item.price
+    )
+    if purchase_cost is None:
+        raise HTTPException(status_code=400, detail="Укажите себестоимость первой партии")
+    batch = await create_batch(
+        session=session,
+        item_id=request.item_id,
+        warehouse_id=request.warehouse_id,
+        purchase_cost=purchase_cost,
+        qty=request.qty,
+        sale_price=sale_price,
+    )
+    await session.commit()
     return BatchResponse(
         id=batch.id,
         item_id=batch.item_id,

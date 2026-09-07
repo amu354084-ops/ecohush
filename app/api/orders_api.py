@@ -11,11 +11,11 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_dependencies import SECTION_DEFAULT_ROLES, current_user, get_session, require_roles, require_section, user_permissions
+from app.api.auth_dependencies import ALL_PERMISSIONS, SECTION_DEFAULT_ROLES, current_user, get_session, require_roles, require_section, user_permissions
 from app.models.schema import Counterparty, Item, ItemType, Order, OrderItem, OrderPaymentType, OrderStatus, Sale, User
 from app.services.auth import create_token, hash_password, verify_password
 from app.services.invoice import invoice_html
-from app.services.orders import accept_order, create_order, reject_order, transition_order
+from app.services.orders import accept_order, create_order, delete_order, reject_order, transition_order, update_order
 
 router = APIRouter()
 _login_failures: dict[str, list[float]] = {}
@@ -39,6 +39,7 @@ class OrderItemRequest(BaseModel):
 class OrderCreateRequest(BaseModel):
     client_id: int = Field(gt=0)
     items: list[OrderItemRequest] = Field(min_length=1)
+    referred_by: str | None = Field(default=None, max_length=255)
 
 
 class AcceptRequest(BaseModel):
@@ -175,7 +176,7 @@ async def create_user(data: UserCreateRequest, _: User = Depends(require_roles("
         username=data.username, password_hash=hash_password(data.password),
         full_name=data.full_name, role=data.role,
         can_change_status=data.can_change_status if data.role == "COURIER" else False,
-        permissions=json.dumps(sorted({permission for permission in selected_permissions if permission in SECTION_DEFAULT_ROLES}), ensure_ascii=True),
+        permissions=json.dumps(sorted({permission for permission in selected_permissions if permission in ALL_PERMISSIONS}), ensure_ascii=True),
     )
     session.add(user)
     await session.commit()
@@ -239,7 +240,7 @@ async def change_user_permissions(
     user = await session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    valid = {permission for permission in data.permissions if permission in user_permissions(admin)}
+    valid = {permission for permission in data.permissions if permission in user_permissions(admin) and permission in ALL_PERMISSIONS}
     if user.role == "ADMIN" and user.id == admin.id:
         valid = user_permissions(user)
     user.permissions = json.dumps(sorted(valid), ensure_ascii=True)
@@ -262,7 +263,7 @@ async def delete_user(user_id: int, admin: User = Depends(require_roles("ADMIN")
 
 @router.post("/orders")
 async def create(data: OrderCreateRequest, user: User = Depends(require_section("orders")), session: AsyncSession = Depends(get_session)):
-    order = await create_order(session, user.id, data.client_id, [item.model_dump() for item in data.items])
+    order = await create_order(session, user.id, data.client_id, [item.model_dump() for item in data.items], data.referred_by)
     await session.commit()
     return {"id": order.id, "status": order.status}
 
@@ -290,12 +291,14 @@ async def list_orders(
             "id": order.id,
             "invoice_number": order.invoice_number,
             "client_name": order.client.name if order.client else "",
+            "referred_by": order.referred_by,
             "courier_name": (
                 order.courier.full_name or order.courier.username
                 if order.courier else ""
             ),
             "items": [
                 {
+                    "item_id": item.item_id,
                     "name": item.item.name,
                     "quantity": str(item.quantity),
                     "unit": item.item.unit,
@@ -311,6 +314,47 @@ async def list_orders(
         }
         for order in result.scalars().all()
     ]
+
+
+@router.put("/orders/{order_id}")
+async def update(
+    order_id: int,
+    data: OrderCreateRequest,
+    user: User = Depends(require_section("orders")),
+    session: AsyncSession = Depends(get_session),
+):
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    if order.status == OrderStatus.DELIVERED:
+        raise HTTPException(status_code=403, detail="Доставленную заявку нельзя изменять без отдельной операции сторнирования")
+    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права изменять принятую заявку")
+    try:
+        order = await update_order(session, order_id, data.client_id, [item.model_dump() for item in data.items], data.referred_by)
+        await session.commit()
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"id": order.id, "status": order.status}
+
+
+@router.delete("/orders/{order_id}")
+async def remove(order_id: int, user: User = Depends(require_section("orders")), session: AsyncSession = Depends(get_session)):
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    if order.status == OrderStatus.DELIVERED:
+        raise HTTPException(status_code=403, detail="Доставленную заявку нельзя удалять: продажа уже проведена")
+    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_delete" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права удалять эту заявку")
+    try:
+        await delete_order(session, order_id)
+        await session.commit()
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"id": order_id, "deleted": True}
 
 
 @router.get("/orders/{order_id}/invoice", response_class=HTMLResponse)

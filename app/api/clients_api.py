@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import AsyncGenerator
 
@@ -8,17 +9,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_dependencies import require_section
+from app.api.auth_dependencies import require_section, user_permissions
 from app.db import async_session
 from app.models.schema import User
 from app.models.schema import CashTransaction, Counterparty, Item, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
 from app.services.sales import repay_client_debt
+from app.services.timezone import get_app_timezone
 
 
 class ClientCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=64)
+
+
+class ClientUpdateRequest(ClientCreateRequest):
+    pass
 
 
 class ClientResponse(BaseModel):
@@ -81,14 +87,28 @@ async def list_clients(
     q: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    as_of: date | None = None,
     _: User = Depends(require_section("clients")),
     session: AsyncSession = session_dependency,
 ) -> list[ClientResponse]:
-    debt_total = (
-        select(func.coalesce(func.sum(Sale.debt_amount), 0))
-        .where(Sale.counterparty_id == Counterparty.id)
-        .scalar_subquery()
-    )
+    if as_of:
+        end_of_day = datetime.combine(as_of, time.max, tzinfo=get_app_timezone())
+        sales_total = select(func.coalesce(func.sum(Sale.total_amount), 0)).where(
+            Sale.counterparty_id == Counterparty.id,
+            Sale.created_at <= end_of_day,
+        ).scalar_subquery()
+        paid_total = select(func.coalesce(func.sum(CashTransaction.amount), 0)).where(
+            CashTransaction.counterparty_id == Counterparty.id,
+            CashTransaction.amount > 0,
+            CashTransaction.created_at <= end_of_day,
+        ).scalar_subquery()
+        debt_total = (sales_total - paid_total)
+    else:
+        debt_total = (
+            select(func.coalesce(func.sum(Sale.debt_amount), 0))
+            .where(Sale.counterparty_id == Counterparty.id)
+            .scalar_subquery()
+        )
     stmt = select(Counterparty, debt_total.label("debt_total")).order_by(Counterparty.name, Counterparty.id)
     if q and q.strip():
         search = f"%{q.strip()}%"
@@ -218,9 +238,11 @@ async def repay_client(
 @router.post("/create", response_model=ClientResponse)
 async def create_client(
     request: ClientCreateRequest,
-    _: User = Depends(require_section("clients")),
+    user: User = Depends(require_section("clients")),
     session: AsyncSession = session_dependency,
 ) -> ClientResponse:
+    if "clients_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Администратор не предоставил право изменять клиентов")
     existing = await session.scalar(select(Counterparty).where(Counterparty.name == request.name))
     if existing is not None:
         raise HTTPException(status_code=400, detail="Client already exists")
@@ -229,3 +251,24 @@ async def create_client(
     await session.flush()
     await session.commit()
     return ClientResponse(id=client.id, name=client.name, phone=client.phone, current_debt=str(client.current_debt))
+
+
+@router.patch("/{client_id}", response_model=ClientResponse)
+async def update_client(
+    client_id: int,
+    request: ClientUpdateRequest,
+    user: User = Depends(require_section("clients")),
+    session: AsyncSession = session_dependency,
+) -> ClientResponse:
+    if "clients_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Администратор не предоставил право изменять клиентов")
+    client = await session.get(Counterparty, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    duplicate = await session.scalar(select(Counterparty).where(Counterparty.name == request.name, Counterparty.id != client_id))
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Клиент с таким именем уже существует")
+    client.name = request.name
+    client.phone = request.phone
+    await session.commit()
+    return ClientResponse(id=client.id, name=client.name, phone=client.phone, current_debt=str(client.current_debt or 0))
