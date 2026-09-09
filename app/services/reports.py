@@ -80,11 +80,11 @@ async def build_pnl_summary(
         period_to = date_to.strftime("%Y-%m") if isinstance(date_to, datetime) else str(date_to)[:7]
         penalty_stmt = penalty_stmt.where(PayrollPenalty.period <= period_to)
     penalties = Decimal((await session.execute(penalty_stmt)).scalar() or 0).quantize(Decimal("0.01"))
-    net_payroll = payroll - penalties
-    profit = (revenue - cogs - overheads - payroll - penalties).quantize(Decimal("0.01"))
-    gross_profit = (revenue - cogs).quantize(Decimal("0.01"))
-    markup = (gross_profit / cogs * Decimal("100")).quantize(Decimal("0.01")) if cogs else Decimal("0.00")
     operating_expenses = (overheads + payroll + penalties).quantize(Decimal("0.01"))
+    net_payroll = payroll - penalties
+    gross_profit = (revenue - cogs).quantize(Decimal("0.01"))
+    profit = (revenue - cogs - operating_expenses).quantize(Decimal("0.01"))
+    markup = (gross_profit / cogs * Decimal("100")).quantize(Decimal("0.01")) if cogs else Decimal("0.00")
     gross_margin = (gross_profit / revenue * Decimal("100")).quantize(Decimal("0.01")) if revenue else Decimal("0.00")
 
     cash_stmt = select(

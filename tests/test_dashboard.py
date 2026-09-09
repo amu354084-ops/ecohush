@@ -88,6 +88,7 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
         assert summary["cogs"] == Decimal("40.00")
         assert summary["expense"] == Decimal("0.00")
         assert summary["profit"] == Decimal("60.00")
+        assert summary["profit"] == summary["revenue"] - summary["cogs"] - summary["operating_expenses"]
         chart_total = sum((entry["value"] for entry in summary["chart"]["values"]), Decimal("0.00"))
         assert chart_total == summary["revenue"]
         assert summary["cash_income"] == Decimal("0.00")
@@ -254,5 +255,65 @@ async def test_dashboard_top_clients_uses_all_sale_totals():
             "total_amount": Decimal("350.00"),
             "sales_count": 2,
         }
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_period_filters_recent_sales_and_top_clients():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        in_range_client = Counterparty(name="In range", phone="1")
+        old_client = Counterparty(name="Old", phone="2")
+        in_range_sale = Sale(
+            counterparty=in_range_client,
+            total_amount=Decimal("100"),
+            paid_amount=Decimal("100"),
+            debt_amount=Decimal("0"),
+            created_at=datetime(2026, 8, 15, tzinfo=timezone.utc),
+        )
+        old_sale = Sale(
+            counterparty=old_client,
+            total_amount=Decimal("900"),
+            paid_amount=Decimal("900"),
+            debt_amount=Decimal("0"),
+            created_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        )
+        session.add_all([in_range_client, old_client, in_range_sale, old_sale])
+        await session.commit()
+
+        summary = await build_dashboard_summary(
+            session,
+            date_from=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            date_to=datetime(2026, 8, 31, 23, 59, 59, tzinfo=timezone.utc),
+        )
+
+        assert [sale["sale_id"] for sale in summary["recent_sales"]] == [in_range_sale.id]
+        assert [client["client_name"] for client in summary["top_clients"]] == ["In range"]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_daily_values_use_application_timezone():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        sale = Sale(
+            total_amount=Decimal("100"),
+            paid_amount=Decimal("100"),
+            debt_amount=Decimal("0"),
+            created_at=datetime(2026, 8, 1, 22, 30, tzinfo=timezone.utc),
+        )
+        session.add(sale)
+        await session.commit()
+
+        summary = await build_dashboard_summary(
+            session,
+            date_from=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            date_to=datetime(2026, 8, 2, 23, 59, 59, tzinfo=timezone.utc),
+        )
+
+        daily = {row["day"]: row["income"] for row in summary["daily_sales"]}
+        assert daily["2026-08-02"] == Decimal("100.00")
 
     await engine.dispose()

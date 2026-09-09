@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
@@ -12,6 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.schema import Batch, Counterparty, Item, ItemType, Sale, SaleItem, SaleItemBatchAllocation
 from app.services.reports import build_pnl_summary
 from app.services.timezone import get_app_timezone
+
+
+def _to_app_timezone(value: datetime, app_timezone) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(app_timezone)
 
 
 async def build_dashboard_summary(
@@ -77,52 +83,47 @@ async def build_dashboard_summary(
     chart_start_dt = datetime.combine(chart_start, datetime.min.time(), tzinfo=tz)
     chart_end_dt = datetime.combine(chart_end, datetime.max.time(), tzinfo=tz)
 
+    daily_sales: dict[str, Decimal] = {}
     daily_result = await session.execute(
-        select(
-            func.date(Sale.created_at).label("day"),
-            func.coalesce(func.sum(Sale.total_amount), 0).label("income"),
+        select(Sale.created_at, Sale.total_amount).where(
+            Sale.created_at >= chart_start_dt,
+            Sale.created_at <= chart_end_dt,
         )
-        .where(Sale.created_at >= chart_start_dt, Sale.created_at <= chart_end_dt)
-        .group_by(func.date(Sale.created_at))
-        .order_by(func.date(Sale.created_at))
     )
-    daily_sales = {
-        str(row.day): Decimal(row.income or 0).quantize(Decimal("0.01"))
-        for row in daily_result
-    }
+    for created_at, total_amount in daily_result:
+        local_created_at = _to_app_timezone(created_at, tz)
+        day = local_created_at.date().isoformat()
+        daily_sales[day] = daily_sales.get(day, Decimal("0")) + Decimal(total_amount or 0)
+    daily_sales = {day: amount.quantize(Decimal("0.01")) for day, amount in daily_sales.items()}
+
+    daily_cogs: dict[str, Decimal] = {}
     allocation_flow_result = await session.execute(
         select(
-            func.date(Sale.created_at).label("day"),
-            func.coalesce(
-                func.sum(
-                    SaleItemBatchAllocation.qty * SaleItemBatchAllocation.unit_cost
-                ),
-                0,
-            ).label("expense"),
+            Sale.created_at,
+            SaleItemBatchAllocation.qty * SaleItemBatchAllocation.unit_cost,
         )
         .join(SaleItem, SaleItem.sale_id == Sale.id)
         .join(SaleItemBatchAllocation, SaleItemBatchAllocation.sale_item_id == SaleItem.id)
         .where(Sale.created_at >= chart_start_dt, Sale.created_at <= chart_end_dt)
-        .group_by(func.date(Sale.created_at))
-        .order_by(func.date(Sale.created_at))
     )
-    daily_cogs = {str(row.day): Decimal(row.expense or 0) for row in allocation_flow_result}
+    for created_at, amount in allocation_flow_result:
+        local_created_at = _to_app_timezone(created_at, tz)
+        day = local_created_at.date().isoformat()
+        daily_cogs[day] = daily_cogs.get(day, Decimal("0")) + Decimal(amount or 0)
+
     legacy_flow_result = await session.execute(
-        select(
-            func.date(Sale.created_at).label("day"),
-            func.coalesce(func.sum(SaleItem.qty * SaleItem.cost_price), 0).label("expense"),
-        )
+        select(Sale.created_at, SaleItem.qty * SaleItem.cost_price)
         .join(SaleItem, SaleItem.sale_id == Sale.id)
         .where(
             Sale.created_at >= chart_start_dt,
             Sale.created_at <= chart_end_dt,
             ~exists().where(SaleItemBatchAllocation.sale_item_id == SaleItem.id),
         )
-        .group_by(func.date(Sale.created_at))
     )
-    for row in legacy_flow_result:
-        day = str(row.day)
-        daily_cogs[day] = daily_cogs.get(day, Decimal(0)) + Decimal(row.expense or 0)
+    for created_at, amount in legacy_flow_result:
+        local_created_at = _to_app_timezone(created_at, tz)
+        day = local_created_at.date().isoformat()
+        daily_cogs[day] = daily_cogs.get(day, Decimal("0")) + Decimal(amount or 0)
     daily_sales_flow = {
         day: {
             "income": daily_sales.get(day, Decimal(0)),
@@ -135,6 +136,14 @@ async def build_dashboard_summary(
     recent_result = await session.execute(
         select(Sale)
         .options(selectinload(Sale.counterparty))
+        .where(*(
+            condition
+            for condition in (
+                Sale.created_at >= date_from if date_from else None,
+                Sale.created_at <= date_to if date_to else None,
+            )
+            if condition is not None
+        ))
         .order_by(Sale.created_at.desc(), Sale.id.desc())
         .limit(5)
     )
@@ -150,7 +159,7 @@ async def build_dashboard_summary(
         }
         for sale in recent_result.scalars().all()
     ]
-    top_clients_result = await session.execute(
+    top_clients_stmt = (
         select(
             Counterparty.id.label("client_id"),
             Counterparty.name.label("client_name"),
@@ -159,6 +168,13 @@ async def build_dashboard_summary(
             func.count(Sale.id).label("sales_count"),
         )
         .join(Sale, Sale.counterparty_id == Counterparty.id)
+    )
+    if date_from:
+        top_clients_stmt = top_clients_stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        top_clients_stmt = top_clients_stmt.where(Sale.created_at <= date_to)
+    top_clients_result = await session.execute(
+        top_clients_stmt
         .group_by(Counterparty.id, Counterparty.name, Counterparty.phone)
         .order_by(func.sum(Sale.total_amount).desc(), Counterparty.name)
         .limit(10)
@@ -187,7 +203,12 @@ async def build_dashboard_summary(
 
     return {
         "sales_count": len(sales),
-        "production_count": len([b for b in batches if b.remaining_qty > 0]),
+        "production_count": len([
+            batch for batch in batches
+            if batch.remaining_qty > 0
+            and (not date_from or _to_app_timezone(batch.created_at, tz) >= date_from.astimezone(tz))
+            and (not date_to or _to_app_timezone(batch.created_at, tz) <= date_to.astimezone(tz))
+        ]),
         "raw_material_count": len([item for item in items if item.type == ItemType.RAW]),
         "finished_items_count": len([item for item in items if item.type == ItemType.FINAL]),
         "total_stock_qty": total_stock_qty,

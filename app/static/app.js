@@ -1191,10 +1191,14 @@ async function loadDashboard() {
       maximumFractionDigits: 2,
     });
   }
-  if (metricSales) metricSales.textContent = formatMoney(data.income ?? 0);
-  if (metricCogs) metricCogs.textContent = formatMoney(data.cogs ?? 0);
-  if (metricExpense) metricExpense.textContent = formatMoney(data.expense ?? 0);
-  if (metricProfit) metricProfit.textContent = formatMoney(data.profit ?? 0);
+  const dashboardRevenue = Number(data.revenue ?? data.income ?? 0);
+  const dashboardCogs = Number(data.cogs ?? 0);
+  const dashboardExpenses = Number(data.operating_expenses ?? data.expense ?? 0);
+  const dashboardProfit = dashboardRevenue - dashboardCogs - dashboardExpenses;
+  if (metricSales) metricSales.textContent = formatMoney(dashboardRevenue);
+  if (metricCogs) metricCogs.textContent = formatMoney(dashboardCogs);
+  if (metricExpense) metricExpense.textContent = formatMoney(dashboardExpenses);
+  if (metricProfit) metricProfit.textContent = formatMoney(dashboardProfit);
   if (metricCashBalance) metricCashBalance.textContent = formatMoney(data.company_balance ?? 0);
   if (summarySales) summarySales.textContent = data.sales_count ?? '0';
   if (summaryBatches) summaryBatches.textContent = data.production_count ?? '0';
