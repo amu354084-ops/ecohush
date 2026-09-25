@@ -134,7 +134,6 @@ async def test_sale_uses_batch_purchase_cost_not_sale_price():
             payment_method=PaymentMethod.CASH,
         )
         assert result["total_amount"] == Decimal("58.00")
-        sale_item = (await session.execute(__import__('sqlalchemy').select(__import__('sqlalchemy').func.count()).select_from(__import__('sqlalchemy').table('sale_items'))))
         assert result["items"][0]["cost_price"] == Decimal("17.50")
     await engine.dispose()
 

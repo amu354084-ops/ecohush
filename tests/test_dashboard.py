@@ -77,7 +77,6 @@ async def test_build_dashboard_summary_counts_sales_and_finance():
             payment_method=PaymentMethod.BANK,
             description="rent",
         )
-        overhead = None
         session.add_all([warehouse, item, batch, low_stock_item, low_stock_batch, sale, sale_item, expense])
         await session.commit()
 
