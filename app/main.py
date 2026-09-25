@@ -235,6 +235,7 @@ async def ensure_sqlite_rbac_order_fields(conn) -> None:
         ("users", "must_change_password", "BOOLEAN NOT NULL DEFAULT 0"),
         ("users", "permissions", "TEXT"),
         ("order_items", "discount", "NUMERIC(18, 2) NOT NULL DEFAULT 0"),
+        ("orders", "sale_id", "INTEGER REFERENCES sales(id)"),
         ("items", "price", "NUMERIC(18, 4) NOT NULL DEFAULT 0"),
     )
     for table, column, definition in migrations:

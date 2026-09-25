@@ -15,7 +15,7 @@ from app.api.auth_dependencies import ALL_PERMISSIONS, SECTION_DEFAULT_ROLES, cu
 from app.models.schema import Counterparty, Item, ItemType, Order, OrderItem, OrderPaymentType, OrderStatus, Sale, User
 from app.services.auth import create_token, hash_password, verify_password
 from app.services.invoice import invoice_html
-from app.services.orders import accept_order, create_order, delete_order, reject_order, transition_order, update_order
+from app.services.orders import accept_order, create_order, delete_order, reject_order, reverse_delivered_order, transition_order, update_order
 
 router = APIRouter()
 _login_failures: dict[str, list[float]] = {}
@@ -327,7 +327,13 @@ async def update(
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     if order.status == OrderStatus.DELIVERED:
-        raise HTTPException(status_code=403, detail="Доставленную заявку нельзя изменять без отдельной операции сторнирования")
+        if "orders_edit_delivered" not in user_permissions(user):
+            raise HTTPException(status_code=403, detail="Нет права изменять доставленную заявку")
+        try:
+            await reverse_delivered_order(session, order)
+        except ValueError as exc:
+            await session.rollback()
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_edit" not in user_permissions(user):
         raise HTTPException(status_code=403, detail="Нет права изменять принятую заявку")
     try:
@@ -345,7 +351,13 @@ async def remove(order_id: int, user: User = Depends(require_section("orders")),
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     if order.status == OrderStatus.DELIVERED:
-        raise HTTPException(status_code=403, detail="Доставленную заявку нельзя удалять: продажа уже проведена")
+        if "orders_edit_delivered" not in user_permissions(user):
+            raise HTTPException(status_code=403, detail="Нет права удалять доставленную заявку")
+        try:
+            await reverse_delivered_order(session, order)
+        except ValueError as exc:
+            await session.rollback()
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_delete" not in user_permissions(user):
         raise HTTPException(status_code=403, detail="Нет права удалять эту заявку")
     try:

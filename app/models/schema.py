@@ -74,6 +74,7 @@ class Order(Base):
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal(0))
     payment_type: Mapped[OrderPaymentType | None] = mapped_column(String(16), nullable=True)
+    sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     delivered_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -20,6 +20,7 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.sales import checkout_sale
+from app.services.production import process_return
 from app.models.schema import PaymentMethod
 from app.services.timezone import get_app_timezone
 
@@ -139,6 +140,26 @@ async def delete_order(session: AsyncSession, order_id: int) -> None:
     await session.flush()
 
 
+async def reverse_delivered_order(session: AsyncSession, order: Order) -> None:
+    if order.status != OrderStatus.DELIVERED:
+        return
+    if order.sale_id is None:
+        raise ValueError("Для этой доставленной заявки не найдена связанная продажа")
+    await process_return(
+        session=session,
+        sale_id=order.sale_id,
+        defective=False,
+        comment=f"Сторнирование заявки №{order.id}",
+    )
+    order.status = OrderStatus.PENDING
+    order.invoice_number = None
+    order.payment_type = None
+    order.sale_id = None
+    order.delivered_at = None
+    order.discount_amount = Decimal(0)
+    await session.flush()
+
+
 async def accept_order(session: AsyncSession, order_id: int, discount_amount: Decimal = Decimal(0)) -> Order:
     order = await _get_order(session, order_id)
     if order.status != OrderStatus.PENDING:
@@ -220,7 +241,7 @@ async def _complete_delivery(
         }
         for item in order.items
     ]
-    await checkout_sale(
+    sale = await checkout_sale(
         session=session,
         counterparty_id=order.client_id,
         items=sale_items,
@@ -229,6 +250,7 @@ async def _complete_delivery(
     )
     order.status = OrderStatus.DELIVERED
     order.payment_type = payment_type
+    order.sale_id = sale["sale_id"]
     order.delivered_at = datetime.now(get_app_timezone())
     await session.flush()
 

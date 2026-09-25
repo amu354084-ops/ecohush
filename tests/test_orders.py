@@ -19,7 +19,7 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.inventory import create_batch
-from app.services.orders import accept_order, create_order, delete_order, renumber_invoice_numbers, transition_order, update_order
+from app.services.orders import accept_order, create_order, delete_order, renumber_invoice_numbers, reverse_delivered_order, transition_order, update_order
 from app.services.invoice import invoice_html
 
 
@@ -185,6 +185,37 @@ async def test_accepted_order_cannot_be_deleted():
         await accept_order(session, order.id)
         with pytest.raises(ValueError, match="Удалять можно только"):
             await delete_order(session, order.id)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delivered_order_can_be_reversed_with_stock_and_debt_returned():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        courier = User(username="reverse-courier", password_hash="test", role="COURIER", can_change_status=True)
+        client = Counterparty(name="Reverse Client")
+        item = Item(code="REVERSE-1", name="Reverse Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, client, item, warehouse])
+        await session.flush()
+        batch = await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+        order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 1}])
+        await accept_order(session, order.id)
+        await transition_order(session, order.id, OrderStatus.IN_TRANSIT, actor=courier)
+        await transition_order(session, order.id, OrderStatus.DELIVERED, OrderPaymentType.DEBT, courier)
+        await session.refresh(order)
+        assert order.sale_id is not None
+        assert client.current_debt == Decimal("10.00")
+        await reverse_delivered_order(session, order)
+        await session.refresh(batch)
+        await session.refresh(client)
+        assert order.status == OrderStatus.PENDING
+        assert order.sale_id is None
+        assert batch.remaining_qty == Decimal("1.0000")
+        assert client.current_debt == Decimal("0.00")
     await engine.dispose()
 
 

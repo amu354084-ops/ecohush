@@ -338,14 +338,28 @@ async function safeJson(response) {
 }
 
 async function fetchJson(url, options = {}) {
-  let response;
   const headers = new Headers(options.headers || {});
   const token = sessionStorage.getItem('erp_token');
   if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
-  try {
-    response = await fetch(url, { ...options, headers });
-  } catch (error) {
-    return { detail: error?.message || 'Сервер недоступен', status_code: 0 };
+  const method = (options.method || 'GET').toUpperCase();
+  const attempts = method === 'GET' ? 3 : 1;
+  let response;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+      response = await fetch(url, { ...options, headers, signal: controller.signal });
+      clearTimeout(timeoutId);
+      break;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      lastError = error;
+      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  if (!response) {
+    return { detail: lastError?.name === 'AbortError' ? 'Сервер не ответил за 20 секунд' : (lastError?.message || 'Сервер недоступен'), status_code: 0 };
   }
   const data = await safeJson(response);
   if (response.status === 401 && !url.endsWith('/login')) {
@@ -517,8 +531,8 @@ async function loadOrders(status = state.orderStatus) {
     }).join('<br>');
     const orderTotal = Math.max(0, (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0) - Number(item.discount || 0), 0) - Number(order.discount_amount || 0));
     const permissions = (() => { try { return JSON.parse(sessionStorage.getItem('erp_permissions') || '[]'); } catch { return []; } })();
-    const canEdit = ['PENDING', 'REJECTED'].includes(order.status) || permissions.includes('orders_edit');
-    const canDelete = ['PENDING', 'REJECTED'].includes(order.status) || permissions.includes('orders_delete');
+    const canEdit = ['PENDING', 'REJECTED'].includes(order.status) || (order.status !== 'DELIVERED' && permissions.includes('orders_edit')) || (order.status === 'DELIVERED' && permissions.includes('orders_edit_delivered'));
+    const canDelete = ['PENDING', 'REJECTED'].includes(order.status) || (order.status !== 'DELIVERED' && permissions.includes('orders_delete')) || (order.status === 'DELIVERED' && permissions.includes('orders_edit_delivered'));
     return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Кто дал клиента: ${escapeHtml(order.referred_by || 'не указан')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${canEdit ? `<button type="button" class="button-second edit-order" data-order-id="${escapeHtml(order.id)}">Изменить</button>` : ''}${canDelete ? `<button type="button" class="button-second delete-order" data-order-id="${escapeHtml(order.id)}">Удалить</button>` : ''}${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">В путь</button>` : ''}</div></article>`;
   }).join('') || '<div class="status-box">Заявок нет.</div>';
   const pagination = document.getElementById('orders-pagination');
