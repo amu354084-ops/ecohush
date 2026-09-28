@@ -237,6 +237,7 @@ async def ensure_sqlite_rbac_order_fields(conn) -> None:
         ("order_items", "discount", "NUMERIC(18, 2) NOT NULL DEFAULT 0"),
         ("orders", "sale_id", "INTEGER REFERENCES sales(id)"),
         ("items", "price", "NUMERIC(18, 4) NOT NULL DEFAULT 0"),
+        ("cash_transactions", "is_company_expense", "BOOLEAN NOT NULL DEFAULT 1"),
     )
     for table, column, definition in migrations:
         result = await conn.execute(text(f"PRAGMA table_info({table})"))

@@ -1840,6 +1840,20 @@
           </div>
           <div class="card dashboard-card">
             <div class="panel-head compact">
+              <div class="panel-title">Топ продавцы</div>
+              <span class="tag neutral">По сумме продаж</span>
+            </div>
+            <table class="table" id="top-sellers-table"></table>
+          </div>
+          <div class="card dashboard-card">
+            <div class="panel-head compact">
+              <div class="panel-title">Кто дал клиента</div>
+              <span class="tag neutral">По сумме продаж</span>
+            </div>
+            <table class="table" id="top-referrers-table"></table>
+          </div>
+          <div class="card dashboard-card">
+            <div class="panel-head compact">
               <div class="panel-title">Топ клиенты за всё время</div>
               <span class="tag neutral">По сумме покупок</span>
             </div>
@@ -2326,6 +2340,8 @@
               </select></div>
             <div class="field"><label>Комментарий</label><input id="finance-transaction-description"
                 placeholder="Например оплата аренды" /></div>
+            <label style="display:flex; gap:8px; align-items:center; margin:10px 0;"><input id="finance-company-expense"
+                type="checkbox" checked> Учитывать в общем счёте компании</label>
             <button id="add-finance-transaction">Добавить операцию</button>
             <h4 style="margin-top:18px;">Добавить накладной расход</h4>
             <div class="field"><label>Категория расхода</label><input id="overhead-category" autocomplete="off"

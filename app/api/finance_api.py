@@ -35,6 +35,7 @@ class CashTransactionCreateRequest(BaseModel):
     payment_method: PaymentMethod
     counterparty_id: int | None = None
     description: str = Field(default="", max_length=500)
+    is_company_expense: bool = True
 
 
 class CashTransactionResponse(BaseModel):
@@ -45,6 +46,7 @@ class CashTransactionResponse(BaseModel):
     counterparty_id: int | None
     counterparty_name: str | None
     description: str | None
+    is_company_expense: bool
     created_at: str
 
 
@@ -165,6 +167,7 @@ async def list_transactions(
                 counterparty_id=tx.counterparty_id,
                 counterparty_name=counterparty_name,
                 description=display_label(tx.description or ""),
+                is_company_expense=tx.is_company_expense,
                 created_at=tx.created_at.isoformat(),
             )
         )
@@ -223,6 +226,7 @@ async def add_transaction(
         payment_method=request.payment_method,
         counterparty_id=request.counterparty_id,
         description=request.description.strip() or None,
+        is_company_expense=request.is_company_expense,
     )
     session.add(transaction)
     await session.flush()
@@ -236,6 +240,7 @@ async def add_transaction(
         counterparty_id=transaction.counterparty_id,
         counterparty_name=counterparty.name if counterparty else None,
         description=display_label(transaction.description or ""),
+        is_company_expense=transaction.is_company_expense,
         created_at=transaction.created_at.isoformat(),
     )
 

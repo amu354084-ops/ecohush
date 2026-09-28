@@ -89,15 +89,41 @@ async def build_pnl_summary(
 
     cash_stmt = select(
         func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.INCOME, CashTransaction.amount), else_=0)), 0),
-        func.coalesce(func.sum(case((CashTransaction.type == CashTransactionType.EXPENSE, CashTransaction.amount), else_=0)), 0),
+        func.coalesce(
+            func.sum(
+                case(
+                    (
+                        (CashTransaction.type == CashTransactionType.EXPENSE)
+                        & (CashTransaction.is_company_expense.is_(True)),
+                        CashTransaction.amount,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
+        func.coalesce(
+            func.sum(
+                case(
+                    (
+                        (CashTransaction.type == CashTransactionType.EXPENSE)
+                        & (CashTransaction.is_company_expense.is_(False)),
+                        CashTransaction.amount,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
     )
     if date_from:
         cash_stmt = cash_stmt.where(CashTransaction.created_at >= date_from)
     if date_to:
         cash_stmt = cash_stmt.where(CashTransaction.created_at <= date_to)
-    cash_income, cash_expenses = (await session.execute(cash_stmt)).one()
+    cash_income, cash_expenses, note_expenses = (await session.execute(cash_stmt)).one()
     cash_income = Decimal(cash_income or 0).quantize(Decimal("0.01"))
     cash_expenses = Decimal(cash_expenses or 0).quantize(Decimal("0.01"))
+    note_expenses = Decimal(note_expenses or 0).quantize(Decimal("0.01"))
     company_balance = (cash_income - cash_expenses).quantize(Decimal("0.01"))
 
     return {
@@ -113,6 +139,7 @@ async def build_pnl_summary(
         "net_payroll": net_payroll,
         "cash_income": cash_income,
         "cash_expenses": cash_expenses,
+        "note_expenses": note_expenses,
         "company_balance": company_balance,
         "profit": profit,
     }

@@ -12,10 +12,12 @@ from app.models.schema import (
     Counterparty,
     Item,
     ItemType,
+    Order,
     OverheadExpense,
     PaymentMethod,
     Sale,
     SaleItem,
+    User,
     Warehouse,
     WarehouseType,
 )
@@ -289,6 +291,72 @@ async def test_dashboard_period_filters_recent_sales_and_top_clients():
 
         assert [sale["sale_id"] for sale in summary["recent_sales"]] == [in_range_sale.id]
         assert [client["client_name"] for client in summary["top_clients"]] == ["In range"]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_tracks_seller_sales_referrers_and_note_expenses():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        seller = User(username="seller1", password_hash="hash", full_name="Seller One", role="COURIER")
+        client = Counterparty(name="Client A", phone="111")
+        session.add_all([seller, client])
+        await session.flush()
+
+        sale_one = Sale(
+            counterparty=client,
+            total_amount=Decimal("200.00"),
+            paid_amount=Decimal("200.00"),
+            debt_amount=Decimal("0.00"),
+            created_at=datetime(2026, 8, 15, 9, 0, tzinfo=timezone.utc),
+        )
+        sale_two = Sale(
+            counterparty=client,
+            total_amount=Decimal("50.00"),
+            paid_amount=Decimal("50.00"),
+            debt_amount=Decimal("0.00"),
+            created_at=datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc),
+        )
+        session.add_all([sale_one, sale_two])
+        await session.flush()
+
+        session.add_all([
+            Order(courier_id=seller.id, client_id=client.id, sale_id=sale_one.id, referred_by="Ali", status="DELIVERED"),
+            Order(courier_id=seller.id, client_id=client.id, sale_id=sale_two.id, referred_by="Ali", status="DELIVERED"),
+            CashTransaction(
+                type=CashTransactionType.EXPENSE,
+                amount=Decimal("30.00"),
+                payment_method=PaymentMethod.CASH,
+                description="Rent",
+                is_company_expense=True,
+            ),
+            CashTransaction(
+                type=CashTransactionType.EXPENSE,
+                amount=Decimal("40.00"),
+                payment_method=PaymentMethod.CASH,
+                description="Taxi note",
+                is_company_expense=False,
+            ),
+        ])
+        await session.commit()
+
+        summary = await build_dashboard_summary(session)
+
+        assert summary["sales_by_seller"][0] == {
+            "seller_id": seller.id,
+            "seller_name": "Seller One",
+            "sales_count": 2,
+            "total_amount": Decimal("250.00"),
+        }
+        assert summary["top_referrers"][0] == {
+            "referrer_name": "Ali",
+            "sales_count": 2,
+            "total_amount": Decimal("250.00"),
+        }
+        assert summary["note_expenses"] == Decimal("40.00")
+        assert summary["cash_expenses"] == Decimal("30.00")
+        assert summary["company_balance"] == Decimal("-30.00")
 
     await engine.dispose()
 

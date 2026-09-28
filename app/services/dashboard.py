@@ -9,7 +9,19 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.schema import Batch, Counterparty, Item, ItemType, Sale, SaleItem, SaleItemBatchAllocation
+from app.models.schema import (
+    Batch,
+    CashTransaction,
+    CashTransactionType,
+    Counterparty,
+    Item,
+    ItemType,
+    Order,
+    Sale,
+    SaleItem,
+    SaleItemBatchAllocation,
+    User,
+)
 from app.services.reports import build_pnl_summary
 from app.services.timezone import get_app_timezone
 
@@ -190,6 +202,77 @@ async def build_dashboard_summary(
         for row in top_clients_result
     ]
 
+    sales_by_seller_stmt = (
+        select(
+            User.id.label("seller_id"),
+            User.full_name.label("seller_name"),
+            func.coalesce(func.sum(Sale.total_amount), 0).label("total_amount"),
+            func.count(Sale.id).label("sales_count"),
+        )
+        .join(Order, Order.courier_id == User.id)
+        .join(Sale, Sale.id == Order.sale_id)
+        .where(Order.sale_id.is_not(None))
+    )
+    if date_from:
+        sales_by_seller_stmt = sales_by_seller_stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        sales_by_seller_stmt = sales_by_seller_stmt.where(Sale.created_at <= date_to)
+    sales_by_seller_result = await session.execute(
+        sales_by_seller_stmt
+        .group_by(User.id, User.full_name)
+        .order_by(func.sum(Sale.total_amount).desc(), User.full_name)
+        .limit(10)
+    )
+    sales_by_seller = [
+        {
+            "seller_id": row.seller_id,
+            "seller_name": row.seller_name or "Не указано",
+            "total_amount": Decimal(row.total_amount or 0).quantize(Decimal("0.01")),
+            "sales_count": row.sales_count,
+        }
+        for row in sales_by_seller_result
+    ]
+
+    top_referrers_stmt = (
+        select(
+            Order.referred_by.label("referrer_name"),
+            func.coalesce(func.sum(Sale.total_amount), 0).label("total_amount"),
+            func.count(Sale.id).label("sales_count"),
+        )
+        .join(Sale, Sale.id == Order.sale_id)
+        .where(Order.referred_by.is_not(None), Order.sale_id.is_not(None))
+    )
+    if date_from:
+        top_referrers_stmt = top_referrers_stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        top_referrers_stmt = top_referrers_stmt.where(Sale.created_at <= date_to)
+    top_referrers_result = await session.execute(
+        top_referrers_stmt
+        .group_by(Order.referred_by)
+        .order_by(func.sum(Sale.total_amount).desc(), Order.referred_by)
+        .limit(10)
+    )
+    top_referrers = [
+        {
+            "referrer_name": row.referrer_name or "Не указано",
+            "total_amount": Decimal(row.total_amount or 0).quantize(Decimal("0.01")),
+            "sales_count": row.sales_count,
+        }
+        for row in top_referrers_result
+    ]
+
+    note_expenses = Decimal(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(CashTransaction.amount), 0)).where(
+                    CashTransaction.type == CashTransactionType.EXPENSE,
+                    CashTransaction.is_company_expense.is_(False),
+                )
+            )
+        ).scalar()
+        or 0
+    ).quantize(Decimal("0.01"))
+
     chart_values = [
         {"key": "cogs", "label": "Себестоимость", "value": pnl["cogs"], "color": "#EF4444"},
         {"key": "operating_expenses", "label": "Все расходы", "value": pnl["operating_expenses"], "color": "#F97316"},
@@ -246,6 +329,9 @@ async def build_dashboard_summary(
         "cash_income": pnl["cash_income"],
         "cash_expenses": pnl["cash_expenses"],
         "company_balance": pnl["company_balance"],
+        "note_expenses": pnl["note_expenses"],
+        "sales_by_seller": sales_by_seller,
+        "top_referrers": top_referrers,
         "daily_sales": [
             {"day": day.isoformat(), "income": daily_sales.get(day.isoformat(), Decimal("0.00"))}
             for day in (chart_start + timedelta(days=offset) for offset in range((chart_end - chart_start).days + 1))

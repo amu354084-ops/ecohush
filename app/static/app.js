@@ -1248,6 +1248,26 @@ async function loadDashboard() {
     'Нет данных о продажах.'
   );
   renderTable(
+    'top-sellers-table',
+    [
+      { key: 'seller_name', label: 'Продавец' },
+      { key: 'total_amount', label: 'Продано на сумму' },
+      { key: 'sales_count', label: 'Продаж' },
+    ],
+    data.sales_by_seller || [],
+    'Нет продаж по продавцам.'
+  );
+  renderTable(
+    'top-referrers-table',
+    [
+      { key: 'referrer_name', label: 'Кто дал клиента' },
+      { key: 'total_amount', label: 'Продано на сумму' },
+      { key: 'sales_count', label: 'Продаж' },
+    ],
+    data.top_referrers || [],
+    'Нет данных по источникам клиентов.'
+  );
+  renderTable(
     'top-clients-table',
     [
       { key: 'client_name', label: 'Клиент' },
@@ -2701,6 +2721,7 @@ document.addEventListener('DOMContentLoaded', () => {
         payment_method: document.getElementById('finance-payment-method').value,
         counterparty_id: Number(document.getElementById('finance-counterparty').value) || null,
         description: document.getElementById('finance-transaction-description').value.trim(),
+        is_company_expense: document.getElementById('finance-company-expense')?.checked !== false,
       }),
     });
     if (result?.detail) {

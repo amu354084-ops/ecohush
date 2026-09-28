@@ -322,6 +322,7 @@ class CashTransaction(Base):
     payment_method: Mapped[PaymentMethod] = mapped_column(SQLEnum(PaymentMethod), nullable=False)
     counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparties.id"), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_company_expense: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     counterparty: Mapped[Counterparty | None] = relationship("Counterparty", back_populates="cash_transactions")
