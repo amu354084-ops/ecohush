@@ -404,6 +404,39 @@ async def test_seller_performance_groups_sales_by_employee_referrer_and_lists_pr
 
 
 @pytest.mark.asyncio
+async def test_seller_performance_includes_legacy_delivered_order_without_sale_link():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        seller = User(username="legacy-seller-report", password_hash="hash", full_name="Legacy Seller", role="COURIER")
+        client = Counterparty(name="Legacy Report Client")
+        item = Item(code="LEGACY-SELLER-1", name="Legacy Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        order = Order(
+            courier=seller,
+            client=client,
+            status="DELIVERED",
+            delivered_at=datetime(2026, 9, 30, 14, 0, tzinfo=timezone.utc),
+        )
+        order_item = OrderItem(
+            order=order,
+            item=item,
+            quantity=Decimal("10"),
+            price=Decimal("195"),
+            discount=Decimal("0"),
+        )
+        session.add_all([seller, client, item, order, order_item])
+        await session.flush()
+
+        report = await seller_performance(seller.id, None, None, session)
+
+        assert report["total_amount"] == Decimal("1950.00")
+        assert report["sales_count"] == 1
+        assert report["orders"][0]["order_id"] == order.id
+        assert report["orders"][0]["items"] == "Legacy Product × 10 pcs"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_daily_values_use_application_timezone():
     engine, AsyncSessionLocal = await _setup_db()
     async with AsyncSessionLocal() as session:

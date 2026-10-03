@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,26 +56,37 @@ async def seller_performance(
         raise HTTPException(status_code=404, detail="Сотрудник не найден")
 
     tz = get_app_timezone()
-    sales_query = select(Order, Sale).join(Sale, Sale.id == Order.sale_id).options(
+    sale_timestamp = func.coalesce(Sale.created_at, Order.delivered_at, Order.created_at)
+    sales_query = select(Order, Sale).outerjoin(Sale, Sale.id == Order.sale_id).options(
         selectinload(Order.client),
         selectinload(Order.referrer),
         selectinload(Order.items).selectinload(OrderItem.item),
     ).where(
         Order.courier_id == seller_id,
         Order.status == OrderStatus.DELIVERED,
-        Order.sale_id.is_not(None),
-        Sale.total_amount > 0,
-    ).order_by(Sale.created_at.desc(), Sale.id.desc())
+    ).order_by(sale_timestamp.desc(), Order.id.desc())
     if date_from:
-        sales_query = sales_query.where(Sale.created_at >= datetime.combine(date_from, time.min, tzinfo=tz))
+        sales_query = sales_query.where(sale_timestamp >= datetime.combine(date_from, time.min, tzinfo=tz))
     if date_to:
-        sales_query = sales_query.where(Sale.created_at <= datetime.combine(date_to, time.max, tzinfo=tz))
+        sales_query = sales_query.where(sale_timestamp <= datetime.combine(date_to, time.max, tzinfo=tz))
     sales = (await session.execute(sales_query)).all()
 
     source_totals: dict[tuple[int | None, str], dict[str, int | str | Decimal]] = {}
     order_rows = []
     total_amount = Decimal(0)
     for order, sale in sales:
+        if sale is not None:
+            amount = Decimal(sale.total_amount or 0)
+            sale_created_at = sale.created_at
+        else:
+            order_total = sum(
+                (line.quantity * line.price - (line.discount or Decimal(0)) for line in order.items),
+                Decimal(0),
+            ) - (order.discount_amount or Decimal(0))
+            amount = max(Decimal(0), order_total).quantize(Decimal("0.01"))
+            sale_created_at = order.delivered_at or order.created_at
+        if amount <= 0:
+            continue
         source_name = (
             order.referrer.full_name or order.referrer.username
             if order.referrer else order.referred_by or "Не указан"
@@ -87,7 +98,6 @@ async def seller_performance(
             "total_amount": Decimal(0),
             "sales_count": 0,
         })
-        amount = Decimal(sale.total_amount or 0)
         source_row["total_amount"] = Decimal(source_row["total_amount"]) + amount
         source_row["sales_count"] = int(source_row["sales_count"]) + 1
         total_amount += amount
@@ -98,7 +108,7 @@ async def seller_performance(
             "referrer_id": order.referred_by_user_id,
             "referrer_name": source_name,
             "total_amount": amount.quantize(Decimal("0.01")),
-            "created_at": sale.created_at,
+            "created_at": sale_created_at,
             "items": "; ".join(
                 f"{line.item.name} × {line.quantity} {line.item.unit}" for line in order.items
             ),
