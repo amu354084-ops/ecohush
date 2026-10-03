@@ -35,7 +35,9 @@ class User(Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    orders: Mapped[list["Order"]] = relationship("Order", back_populates="courier")
+    orders: Mapped[list["Order"]] = relationship(
+        "Order", back_populates="courier", foreign_keys="Order.courier_id"
+    )
 
 
 class AppSetting(Base):
@@ -70,6 +72,7 @@ class Order(Base):
     courier_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("counterparties.id"), nullable=True)
     referred_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    referred_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[OrderStatus] = mapped_column(String(32), nullable=False, default=OrderStatus.PENDING)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal(0))
@@ -78,7 +81,10 @@ class Order(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     delivered_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    courier: Mapped[User | None] = relationship("User", back_populates="orders")
+    courier: Mapped[User | None] = relationship(
+        "User", back_populates="orders", foreign_keys=[courier_id]
+    )
+    referrer: Mapped[User | None] = relationship("User", foreign_keys=[referred_by_user_id])
     client: Mapped["Counterparty | None"] = relationship("Counterparty", back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship(
         "OrderItem", back_populates="order", cascade="all, delete-orphan"
@@ -228,6 +234,23 @@ class Counterparty(Base):
     sales: Mapped[list["Sale"]] = relationship("Sale", back_populates="counterparty")
     cash_transactions: Mapped[list["CashTransaction"]] = relationship("CashTransaction", back_populates="counterparty")
     orders: Mapped[list[Order]] = relationship("Order", back_populates="client")
+    manual_debts: Mapped[list["ManualDebt"]] = relationship("ManualDebt", back_populates="counterparty")
+
+
+class ManualDebt(Base):
+    __tablename__ = "manual_debts"
+    __table_args__ = (Index("ix_manual_debts_counterparty_created", "counterparty_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    counterparty_id: Mapped[int] = mapped_column(ForeignKey("counterparties.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    counterparty: Mapped[Counterparty] = relationship("Counterparty", back_populates="manual_debts")
 
 
 class Sale(Base):

@@ -121,6 +121,7 @@ async def finance_overview(
         "operating_expenses": str(summary["operating_expenses"]),
         "cash_income": str(summary["cash_income"]),
         "cash_expenses": str(summary["cash_expenses"]),
+        "note_expenses": str(summary["note_expenses"]),
         "overheads": str(summary["overheads"]),
         "payroll": str(summary["payroll"]),
         "penalties": str(summary["penalties"]),

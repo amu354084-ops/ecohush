@@ -3,9 +3,11 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.orders_api import list_orders
 from app.models.schema import (
     Base,
     Counterparty,
@@ -168,6 +170,36 @@ async def test_order_can_be_updated_before_acceptance_and_deleted_only_before_ac
 
 
 @pytest.mark.asyncio
+async def test_order_can_store_employee_referrer_id_and_name():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        seller = User(username="seller-with-referrer", password_hash="test", role="COURIER")
+        referrer = User(username="referrer-employee", password_hash="test", full_name="Ismail Referrer", role="AGENT")
+        client = Counterparty(name="Referrer Client")
+        item = Item(code="REFERRER-ITEM", name="Referrer Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([seller, referrer, client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+
+        order = await create_order(
+            session,
+            seller.id,
+            client.id,
+            [{"item_id": item.id, "quantity": 1}],
+            referred_by_user_id=referrer.id,
+        )
+
+        assert order.referred_by_user_id == referrer.id
+        assert order.referred_by == "Ismail Referrer"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_accepted_order_cannot_be_deleted():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as connection:
@@ -185,6 +217,38 @@ async def test_accepted_order_cannot_be_deleted():
         await accept_order(session, order.id)
         with pytest.raises(ValueError, match="Удалять можно только"):
             await delete_order(session, order.id)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_accepted_orders_cannot_be_updated_or_deleted_but_in_transit_can_be_deleted():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        courier = User(username="locked-courier", password_hash="test", role="COURIER", can_change_status=True)
+        first_client = Counterparty(name="First Client")
+        second_client = Counterparty(name="Second Client")
+        item = Item(code="LOCK-1", name="Locked Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([courier, first_client, second_client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+
+        order = await create_order(session, courier.id, first_client.id, [{"item_id": item.id, "quantity": 1}])
+        await accept_order(session, order.id)
+
+        with pytest.raises(ValueError, match="можно изменять только до одобрения|до передачи в путь"):
+            await update_order(session, order.id, second_client.id, [{"item_id": item.id, "quantity": 2}])
+        with pytest.raises(ValueError, match="Удалять можно только"):
+            await delete_order(session, order.id)
+
+        await transition_order(session, order.id, OrderStatus.IN_TRANSIT, actor=courier)
+        with pytest.raises(ValueError, match="можно изменять только до одобрения|до передачи в путь"):
+            await update_order(session, order.id, second_client.id, [{"item_id": item.id, "quantity": 2}])
+        await delete_order(session, order.id)
+        assert await session.get(Order, order.id) is None
     await engine.dispose()
 
 
@@ -234,3 +298,40 @@ def test_order_invoice_subtracts_item_and_order_discounts_from_total():
     html = invoice_html(order)
     assert "<th>200.00</th><th>15.00</th><th>185.00</th>" in html
     assert "на сумму 185.00 сомони" in html
+
+
+@pytest.mark.asyncio
+async def test_list_orders_can_filter_by_seller():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        admin = User(username="admin", password_hash="test", role="ADMIN", full_name="Admin")
+        seller_a = User(username="seller-a", password_hash="test", role="COURIER", full_name="Seller A")
+        seller_b = User(username="seller-b", password_hash="test", role="COURIER", full_name="Seller B")
+        agent = User(username="agent", password_hash="test", role="AGENT", full_name="Agent")
+        client = Counterparty(name="Client")
+        item = Item(code="SELLER-FILTER", name="Filtered Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([admin, seller_a, seller_b, agent, client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("5"), Decimal("5"), Decimal("10"))
+
+        order_a_1 = await create_order(session, seller_a.id, client.id, [{"item_id": item.id, "quantity": Decimal("1")}])
+        order_a_2 = await create_order(session, seller_a.id, client.id, [{"item_id": item.id, "quantity": Decimal("2")}])
+        order_b = await create_order(session, seller_b.id, client.id, [{"item_id": item.id, "quantity": Decimal("3")}])
+
+        await accept_order(session, order_a_1.id)
+        await accept_order(session, order_b.id)
+
+        filtered = await list_orders(status=None, limit=10, offset=0, seller_id=seller_a.id, user=admin, session=session)
+        ids = {entry["id"] for entry in filtered}
+
+        assert ids == {order_a_1.id, order_a_2.id}
+        assert all(entry["courier_name"] == "Seller A" for entry in filtered)
+        with pytest.raises(HTTPException) as exc_info:
+            await list_orders(status=None, limit=10, offset=0, seller_id=seller_b.id, user=agent, session=session)
+        assert exc_info.value.status_code == 403
+
+    await engine.dispose()

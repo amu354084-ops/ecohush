@@ -1843,6 +1843,7 @@
               <div class="panel-title">Топ продавцы</div>
               <span class="tag neutral">По сумме продаж</span>
             </div>
+            <div id="seller-sales-bars" class="seller-sales-bars" aria-label="Сумма продаж по сотрудникам"></div>
             <table class="table" id="top-sellers-table"></table>
           </div>
           <div class="card dashboard-card">
@@ -1881,8 +1882,24 @@
             </div>
           </div>
         </div>
+        <div class="card dashboard-card" style="margin-top:18px;">
+          <div class="panel-head compact">
+            <div class="panel-title">Продажи сотрудника и источники клиентов</div>
+            <span class="tag neutral">Доставленные продажи</span>
+          </div>
+          <div class="field" style="max-width:420px;">
+            <label>Сотрудник, оформивший заявку</label>
+            <select id="seller-performance-select">
+              <option value="">Выберите сотрудника</option>
+            </select>
+          </div>
+          <div class="status-box" id="seller-performance-summary">Выберите сотрудника.</div>
+          <h4>Кто приводил клиентов</h4>
+          <table class="table" id="seller-referrers-table"></table>
+          <h4 style="margin-top:16px;">Заявки и проданные товары</h4>
+          <table class="table" id="seller-orders-table"></table>
+        </div>
       </section>
-
       <section class="workspace" data-view="warehouse">
         <div class="card">
           <h3>Склад и товары</h3>
@@ -1901,6 +1918,8 @@
                 </select>
               </div>
               <div class="field"><label>Единица</label><input id="new-item-unit" placeholder="шт, л" value="шт" /></div>
+              <div class="field"><label>Базовая цена</label><input id="new-item-price" type="number" min="0" step="0.01"
+                  value="0" /></div>
               <div class="field"><label>Мин. остаток</label><input id="new-item-min-stock" type="number" min="0"
                   value="0" /></div>
               <button id="create-item">Создать товар</button>
@@ -1963,6 +1982,21 @@
             </div>
           </div>
           <div id="stock-summary-selection" class="status-box" style="margin-top:10px;">Выбрано: Все склады. Позиций: 0.
+          </div>
+          <div class="form-grid"
+            style="margin-top:12px; gap:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+            <div class="status-box">
+              <div style="font-size:0.82rem; color:#666; margin-bottom:6px;">Остаток по себестоимости</div>
+              <div id="warehouse-total-cost" style="font-size:1.6rem; font-weight:700; color:#0066cc;">0 сом</div>
+            </div>
+            <div class="status-box">
+              <div style="font-size:0.82rem; color:#666; margin-bottom:6px;">Остаток по цене продажи</div>
+              <div id="warehouse-total-sale" style="font-size:1.6rem; font-weight:700; color:#198754;">0 сом</div>
+            </div>
+            <div class="status-box">
+              <div style="font-size:0.82rem; color:#666; margin-bottom:6px;">Разница</div>
+              <div id="warehouse-total-diff" style="font-size:1.6rem; font-weight:700; color:#8a5b00;">0 сом</div>
+            </div>
           </div>
           <div class="form-grid" style="margin-top:12px; gap:18px; align-items:flex-end;">
             <div class="field"><label>История с</label><input id="stock-history-from" type="date" /></div>
@@ -2209,8 +2243,9 @@
           <div class="card" id="courier-order-panel">
             <h3>Новая заявка</h3>
             <div class="field"><label>Клиент</label><select id="order-client"></select></div>
-            <div class="field"><label>Кто дал клиента</label><input id="order-referred-by" maxlength="255"
-                placeholder="Например: Чалбкунанnda" /></div>
+            <div class="field"><label>Кто дал клиента</label><select id="order-referred-by">
+                <option value="">Не указан</option>
+              </select></div>
             <div id="order-lines" class="row-stack"></div>
             <div class="status-box" id="order-total-summary">Общая сумма заказа: 0.00 сом</div>
             <button id="add-order-line" class="button-second" type="button">Добавить товар</button>
@@ -2220,6 +2255,12 @@
           <div class="card">
             <div class="panel-head compact">
               <h3>Заказы</h3><button id="refresh-orders" class="button-second" type="button">Обновить</button>
+            </div>
+            <div class="field" id="order-seller-filter-wrapper" style="display:none; margin-bottom:12px;">
+              <label>Продавец</label>
+              <select id="order-seller-filter">
+                <option value="">Все продавцы</option>
+              </select>
             </div>
             <div class="order-tabs" id="order-tabs"></div>
             <div class="order-list" id="orders-list"></div>
@@ -2238,6 +2279,22 @@
           <div class="field"><label>Поиск по имени или телефону</label><input id="debt-search"
               placeholder="Имя или номер телефона"></div>
           <div class="field"><label>Должники на дату</label><input id="debt-as-of" type="date"></div>
+          <div id="manual-debt-tools" class="admin-only"
+            style="margin:16px 0; padding-top:14px; border-top:1px solid var(--line, #d5d9dd);">
+            <h4>Отдельные записи долга</h4>
+            <div class="field"><label>Клиент</label><select id="manual-debt-client">
+                <option value="">Выберите клиента</option>
+              </select></div>
+            <div class="form-grid">
+              <div class="field"><label>Сумма долга</label><input id="manual-debt-amount" type="number" min="0.01"
+                  step="0.01" placeholder="0.00"></div>
+              <div class="field"><label>Причина / комментарий</label><input id="manual-debt-description" maxlength="500"
+                  placeholder="Например, долг по договорённости"></div>
+            </div>
+            <button id="add-manual-debt" type="button">Добавить долг</button>
+            <div class="status-box" id="manual-debt-status">Эти записи не оформляются как продажа или погашение.</div>
+            <table class="table" id="manual-debts-table"></table>
+          </div>
           <div class="status-box" id="debts-summary">Загрузка итогов...</div>
           <table class="table" id="debts-table"></table>
           <div class="card debt-details" id="debt-details" style="display:none;">
@@ -2278,6 +2335,8 @@
                 <label class="permission-option"><input type="checkbox" value="formula"> Формулы</label>
                 <label class="permission-option"><input type="checkbox" value="orders_edit"> Изменять заявки</label>
                 <label class="permission-option"><input type="checkbox" value="orders_delete"> Удалять заявки</label>
+                <label class="permission-option"><input type="checkbox" value="orders_edit_delivered"> Возврат
+                  доставленных заявок</label>
                 <label class="permission-option"><input type="checkbox" value="clients_edit"> Изменять клиентов</label>
                 <label class="permission-option"><input type="checkbox" value="items_edit"> Изменять товары</label>
                 <label class="permission-option"><input type="checkbox" value="batches_edit"> Изменять партии</label>

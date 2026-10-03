@@ -99,6 +99,29 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def build_item_response(item: Item, session: AsyncSession) -> ItemResponse:
+    batch = await session.scalar(
+        select(Batch)
+        .where(Batch.item_id == item.id, Batch.remaining_qty > 0)
+        .order_by(Batch.created_at.desc(), Batch.id.desc())
+        .limit(1)
+    )
+    purchase_cost = str(batch.purchase_cost) if batch is not None else "0"
+    sale_price = str(batch.sale_price) if batch is not None and batch.sale_price > 0 else str(item.price)
+    return ItemResponse(
+        id=item.id,
+        code=item.code,
+        name=item.name,
+        type=display_label(item.type.value),
+        type_code=item.type.value,
+        unit=item.unit,
+        min_stock=item.min_stock,
+        price=str(item.price),
+        purchase_cost=purchase_cost,
+        sale_price=sale_price,
+    )
+
+
 session_dependency = Depends(get_session)
 router = APIRouter(dependencies=[Depends(require_section("warehouse"))])
 
@@ -131,9 +154,9 @@ async def read_items(_: User = Depends(require_section("warehouse")), session: A
             type_code=i.type.value,
             unit=i.unit,
             min_stock=i.min_stock,
-            price=str(batch.sale_price if (batch := active_batch(i)) else i.price),
+            price=str(batch.sale_price if (batch := active_batch(i)) and batch.sale_price > 0 else i.price),
             purchase_cost=str(batch.purchase_cost if batch else 0),
-            sale_price=str(batch.sale_price if batch else i.price),
+            sale_price=str(batch.sale_price if batch and batch.sale_price > 0 else i.price),
         )
         for i in items
     ]
@@ -156,16 +179,7 @@ async def create_item(request: CreateItemRequest, session: AsyncSession = sessio
     await session.flush()
     await session.commit()
     await session.refresh(item)
-    return ItemResponse(
-        id=item.id,
-        code=item.code,
-        name=item.name,
-        type=display_label(item.type.value),
-        type_code=item.type.value,
-        unit=item.unit,
-        min_stock=item.min_stock,
-        price=str(item.price),
-    )
+    return await build_item_response(item, session)
 
 
 @router.patch("/items/{item_id}/price", response_model=ItemResponse, dependencies=[Depends(require_roles("ADMIN"))])
@@ -183,11 +197,7 @@ async def update_item_price(
     item.price = request.price
     await session.commit()
     await session.refresh(item)
-    return ItemResponse(
-        id=item.id, code=item.code, name=item.name,
-        type=display_label(item.type.value), type_code=item.type.value,
-        unit=item.unit, min_stock=item.min_stock, price=str(item.price),
-    )
+    return await build_item_response(item, session)
 
 
 @router.patch("/items/{item_id}", response_model=ItemResponse)
@@ -213,11 +223,7 @@ async def update_item(
         item.price = request.price
     await session.commit()
     await session.refresh(item)
-    return ItemResponse(
-        id=item.id, code=item.code, name=item.name,
-        type=display_label(item.type.value), type_code=item.type.value,
-        unit=item.unit, min_stock=item.min_stock, price=str(item.price),
-    )
+    return await build_item_response(item, session)
 
 
 @router.delete("/items/{item_id}", status_code=204, dependencies=[Depends(require_roles("ADMIN"))])
@@ -346,7 +352,7 @@ async def create_batch_endpoint(
     )
     purchase_cost = request.purchase_cost if request.purchase_cost and request.purchase_cost > 0 else (latest_batch.purchase_cost if latest_batch else None)
     sale_price = request.sale_price if request.sale_price and request.sale_price > 0 else (
-        latest_batch.sale_price if latest_batch else item.price
+        latest_batch.sale_price if latest_batch and latest_batch.sale_price > 0 else item.price
     )
     if purchase_cost is None:
         raise HTTPException(status_code=400, detail="Укажите себестоимость первой партии")
@@ -379,6 +385,8 @@ class StockSummaryResponse(BaseModel):
     warehouse_id: int
     warehouse_name: str
     remaining_qty: str
+    remaining_cost_value: str
+    remaining_sale_value: str
 
 
 class StockHistoryResponse(BaseModel):

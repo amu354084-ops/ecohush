@@ -5,7 +5,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -195,6 +195,11 @@ async def get_stock_summary(
             Item.name.label("item_name"),
             Item.unit,
             func.sum(Batch.remaining_qty).label("remaining_qty"),
+            func.sum(Batch.remaining_qty * Batch.purchase_cost).label("remaining_cost_value"),
+            func.sum(
+                Batch.remaining_qty
+                * case((Batch.sale_price > 0, Batch.sale_price), else_=Item.price)
+            ).label("remaining_sale_value"),
         )
         .join(Warehouse, Warehouse.id == Batch.warehouse_id)
         .join(Item, Item.id == Batch.item_id)
@@ -213,6 +218,8 @@ async def get_stock_summary(
             "item_name": row.item_name,
             "unit": row.unit,
             "remaining_qty": str(row.remaining_qty or 0),
+            "remaining_cost_value": str(row.remaining_cost_value or 0),
+            "remaining_sale_value": str(row.remaining_sale_value or 0),
         }
         for row in result
     ]
@@ -331,6 +338,8 @@ async def export_stock_summary_excel(
         "unit": "Ед.",
         "warehouse_name": "Склад",
         "remaining_qty": "Остаток",
+        "remaining_cost_value": "Остаток по себестоимости",
+        "remaining_sale_value": "Остаток по цене продажи",
     }
 
     rows = [
@@ -340,6 +349,8 @@ async def export_stock_summary_excel(
             "unit": row["unit"],
             "warehouse_name": row["warehouse_name"],
             "remaining_qty": row["remaining_qty"],
+            "remaining_cost_value": row["remaining_cost_value"],
+            "remaining_sale_value": row["remaining_sale_value"],
         }
         for row in stock_rows
     ]

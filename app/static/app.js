@@ -91,10 +91,13 @@ function showView(view) {
   if (view === 'sales') {
     loadCounterpartiesForSales(); loadSaleProducts(); loadClients();
   }
-  if (view === 'dashboard') loadDashboard();
-  if (view === 'orders') { loadOrderForm(); loadOrders(); }
+  if (view === 'dashboard') { loadDashboard(); loadSellerPerformanceOptions(); }
+  if (view === 'orders') { loadOrderForm(); loadOrderSellerFilter().then(() => loadOrders()); }
   if (view === 'users') loadUsers();
-  if (view === 'debts') loadDebts(document.getElementById('debt-search')?.value || '');
+  if (view === 'debts') {
+    loadDebts(document.getElementById('debt-search')?.value || '');
+    if (sessionStorage.getItem('erp_role') === 'ADMIN') loadManualDebtClients();
+  }
 }
 
 async function loadProductionData() {
@@ -460,11 +463,20 @@ function applyRoleUi(role, permissions = []) {
 }
 
 async function loadOrderForm() {
-  const clients = await fetchJson('/api/v1/clients/list?limit=500');
-  const products = await orderRequest('/api/v1/orders/catalog');
+  const [clients, products, referrers] = await Promise.all([
+    fetchJson('/api/v1/clients/list?limit=500'),
+    orderRequest('/api/v1/orders/catalog'),
+    orderRequest('/api/v1/orders/referrers'),
+  ]);
   const clientSelect = document.getElementById('order-client');
+  const referrerSelect = document.getElementById('order-referred-by');
   window.orderProducts = Array.isArray(products) ? products.filter((item) => item.type_code === 'FINAL') : [];
   if (clientSelect) clientSelect.innerHTML = (clients || []).map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)} ${escapeHtml(client.phone || '')}</option>`).join('');
+  if (referrerSelect && Array.isArray(referrers)) {
+    referrerSelect.innerHTML = '<option value="">Не указан</option>' + referrers.map((employee) =>
+      `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)}</option>`
+    ).join('');
+  }
   if (!document.querySelector('#order-lines .order-line')) addOrderLine();
   const options = (window.orderProducts || []).map((item) => `<option value="${escapeHtml(item.id)}" data-price="${escapeHtml(item.price || 0)}" data-unit="${escapeHtml(item.unit)}">${escapeHtml(item.name)} (${escapeHtml(item.unit)})</option>`).join('');
   document.querySelectorAll('#order-lines .order-product').forEach((select) => {
@@ -509,7 +521,9 @@ function updateOrderTotal() {
 async function loadOrders(status = state.orderStatus) {
   if (status !== state.orderStatus) state.ordersPage = 0;
   state.orderStatus = status;
-  const orderQuery = `limit=10&offset=${state.ordersPage * 10}`;
+  const sellerFilter = document.getElementById('order-seller-filter');
+  const sellerId = sellerFilter?.value ? `&seller_id=${encodeURIComponent(sellerFilter.value)}` : '';
+  const orderQuery = `limit=10&offset=${state.ordersPage * 10}${sellerId}`;
   const data = status === 'ACTIVE'
     ? (await Promise.all([orderRequest(`/api/v1/orders?status=ACCEPTED&${orderQuery}`), orderRequest(`/api/v1/orders?status=IN_TRANSIT&${orderQuery}`)])).flat()
     : await orderRequest(`/api/v1/orders?status=${encodeURIComponent(status)}&${orderQuery}`);
@@ -531,10 +545,15 @@ async function loadOrders(status = state.orderStatus) {
     }).join('<br>');
     const orderTotal = Math.max(0, (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0) - Number(item.discount || 0), 0) - Number(order.discount_amount || 0));
     const permissions = (() => { try { return JSON.parse(sessionStorage.getItem('erp_permissions') || '[]'); } catch { return []; } })();
-    const canEdit = ['PENDING', 'REJECTED'].includes(order.status) || (order.status !== 'DELIVERED' && permissions.includes('orders_edit')) || (order.status === 'DELIVERED' && permissions.includes('orders_edit_delivered'));
-    const canDelete = ['PENDING', 'REJECTED'].includes(order.status) || (order.status !== 'DELIVERED' && permissions.includes('orders_delete')) || (order.status === 'DELIVERED' && permissions.includes('orders_edit_delivered'));
-    return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Кто дал клиента: ${escapeHtml(order.referred_by || 'не указан')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${canEdit ? `<button type="button" class="button-second edit-order" data-order-id="${escapeHtml(order.id)}">Изменить</button>` : ''}${canDelete ? `<button type="button" class="button-second delete-order" data-order-id="${escapeHtml(order.id)}">Удалить</button>` : ''}${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">В путь</button>` : ''}</div></article>`;
+    const canEdit = (['PENDING', 'REJECTED'].includes(order.status) && (role === 'ADMIN' || permissions.includes('orders_edit'))) || (order.status === 'DELIVERED' && (role === 'ADMIN' || permissions.includes('orders_edit_delivered')));
+    const canDelete = (['PENDING', 'REJECTED', 'IN_TRANSIT'].includes(order.status) && (role === 'ADMIN' || permissions.includes('orders_delete'))) || (order.status === 'DELIVERED' && (role === 'ADMIN' || permissions.includes('orders_edit_delivered')));
+    return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Кто дал клиента: ${escapeHtml(order.referred_by || 'не указан')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${canEdit ? `<button type="button" class="button-second edit-order" data-order-id="${escapeHtml(order.id)}">Изменить</button>` : ''}${canDelete ? `<button type="button" class="button-second delete-order" data-order-id="${escapeHtml(order.id)}">Удалить</button>` : ''}${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${role === 'ADMIN' && order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">Передать в путь</button>` : ''}</div></article>`;
   }).join('') || '<div class="status-box">Заявок нет.</div>';
+  list.querySelectorAll('.delete-order').forEach((button) => {
+    if (window.orderCache?.[button.dataset.orderId]?.status === 'DELIVERED') {
+      button.textContent = 'Возврат и удалить';
+    }
+  });
   const pagination = document.getElementById('orders-pagination');
   const previous = document.getElementById('orders-prev');
   const next = document.getElementById('orders-next');
@@ -558,7 +577,12 @@ async function loadOrders(status = state.orderStatus) {
   list.querySelectorAll('.transit-order').forEach((button) => button.addEventListener('click', async () => { const result = await orderRequest(`/api/v1/orders/${button.dataset.orderId}/transition`, { method: 'POST', body: JSON.stringify({ status: 'IN_TRANSIT' }) }); if (result.detail) showToast(result.detail); else loadOrders(); }));
   list.querySelectorAll('.deliver-order').forEach((button) => button.addEventListener('click', () => openDeliveryModal(button.dataset.orderId, Number(button.dataset.orderTotal || 0))));
   list.querySelectorAll('.delete-order').forEach((button) => button.addEventListener('click', async () => {
-    if (!window.confirm('Удалить заявку?')) return;
+    const isDelivered = window.orderCache?.[button.dataset.orderId]?.status === 'DELIVERED';
+    if (isDelivered) button.textContent = 'Возврат и удалить';
+    const confirmation = isDelivered
+      ? 'Оформить полный возврат? Товар вернётся на склад, оплата и долг будут сторнированы, заявка будет удалена.'
+      : 'Удалить заявку?';
+    if (!window.confirm(confirmation)) return;
     const result = await orderRequest(`/api/v1/orders/${button.dataset.orderId}`, { method: 'DELETE' });
     if (result.detail) showToast(result.detail); else loadOrders();
   }));
@@ -567,12 +591,40 @@ async function loadOrders(status = state.orderStatus) {
     if (!order) return;
     window.editingOrderId = order.id;
     document.getElementById('order-client').value = [...document.querySelectorAll('#order-client option')].find((option) => option.textContent.startsWith(order.client_name))?.value || '';
-    document.getElementById('order-referred-by').value = order.referred_by || '';
+    const referrerSelect = document.getElementById('order-referred-by');
+    referrerSelect.value = order.referred_by_user_id ? String(order.referred_by_user_id) : '';
+    referrerSelect.dataset.legacyReferrer = order.referred_by_user_id ? '' : (order.referred_by || '');
     document.getElementById('order-lines').innerHTML = '';
     (order.items || []).forEach((item) => { addOrderLine(); const line = document.querySelector('#order-lines .order-line:last-child'); line.querySelector('.order-product').value = item.item_id; line.querySelector('.order-quantity').value = item.quantity; line.querySelector('.order-discount').value = item.price ? (Number(item.discount || 0) / (Number(item.quantity) * Number(item.price)) * 100).toFixed(2) : 0; line.querySelector('.order-product').dispatchEvent(new Event('change')); });
     document.getElementById('create-order').textContent = 'Сохранить изменения';
     document.getElementById('order-client').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }));
+}
+
+async function loadOrderSellerFilter() {
+  const wrapper = document.getElementById('order-seller-filter-wrapper');
+  const select = document.getElementById('order-seller-filter');
+  if (!wrapper || !select) return;
+  if (sessionStorage.getItem('erp_role') !== 'ADMIN') {
+    wrapper.style.display = 'none';
+    select.innerHTML = '<option value="">Все продавцы</option>';
+    return;
+  }
+  const users = await orderRequest('/api/v1/users');
+  if (users?.detail) {
+    wrapper.style.display = 'none';
+    return;
+  }
+  const sellers = (users || []).filter((user) => user.role === 'COURIER' || user.role === 'ADMIN');
+  select.innerHTML = '<option value="">Все продавцы</option>' + sellers.map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.full_name || user.username)}</option>`).join('');
+  wrapper.style.display = 'block';
+  const savedSeller = sessionStorage.getItem('erp_seller_filter') || '';
+  if (sellers.some((user) => String(user.id) === savedSeller)) select.value = savedSeller;
+  select.onchange = () => {
+    sessionStorage.setItem('erp_seller_filter', select.value || '');
+    state.ordersPage = 0;
+    loadOrders();
+  };
 }
 
 let deliveryOrderId = null;
@@ -598,12 +650,102 @@ async function loadDebts(query = '') {
   const params = new URLSearchParams({ limit: '500', q: query });
   if (asOf) params.set('as_of', asOf);
   const data = await fetchJson(`/api/v1/clients/list?${params.toString()}`);
-  const debtClients = (data || []).filter((client) => Number(client.current_debt) > 0);
+  const debtClients = (Array.isArray(data) ? data : []).filter((client) => Number(client.current_debt) > 0);
   const totalDebt = debtClients.reduce((sum, client) => sum + Number(client.current_debt || 0), 0);
   const summary = document.getElementById('debts-summary');
   if (summary) summary.textContent = `Должников: ${debtClients.length} | Общая сумма: ${formatMoney(totalDebt)}${asOf ? ` | На дату: ${asOf}` : ''}`;
   renderTable('debts-table', [{ key: 'name', label: 'Клиент' }, { key: 'phone', label: 'Телефон' }, { key: 'current_debt', label: 'Долг' }], debtClients);
-  document.querySelectorAll('#debts-table tr').forEach((row, index) => { if (index > 0) { row.classList.add('debt-row'); row.addEventListener('click', () => loadDebtDetails(debtClients[index - 1].name)); } });
+  document.querySelectorAll('#debts-table tr').forEach((row, index) => {
+    if (index === 0 || !debtClients[index - 1]) return;
+    const client = debtClients[index - 1];
+    row.classList.add('debt-row');
+    row.addEventListener('click', () => {
+      const select = document.getElementById('manual-debt-client');
+      if (select) select.value = String(client.id);
+      loadManualDebts(client.id);
+      loadDebtDetails(client.name);
+    });
+  });
+}
+
+async function loadManualDebtClients() {
+  const select = document.getElementById('manual-debt-client');
+  if (!select) return;
+  const clients = await fetchJson('/api/v1/clients/list?limit=500');
+  if (!Array.isArray(clients)) {
+    setStatus('manual-debt-status', clients?.detail || 'Не удалось загрузить клиентов.', 'error');
+    return;
+  }
+  const previousValue = select.value || sessionStorage.getItem('manual_debt_client') || '';
+  select.innerHTML = '<option value="">Выберите клиента</option>' + clients.map((client) =>
+    `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}${client.phone ? ` (${escapeHtml(client.phone)})` : ''}</option>`
+  ).join('');
+  if (clients.some((client) => String(client.id) === previousValue)) select.value = previousValue;
+  select.onchange = () => {
+    sessionStorage.setItem('manual_debt_client', select.value || '');
+    loadManualDebts(Number(select.value || 0));
+  };
+  if (select.value) await loadManualDebts(Number(select.value));
+  else renderTable('manual-debts-table', [], []);
+}
+
+async function loadManualDebts(clientId) {
+  if (!clientId) {
+    renderTable('manual-debts-table', [], []);
+    return;
+  }
+  const data = await orderRequest(`/api/v1/clients/${clientId}/manual-debts`);
+  if (data?.detail) {
+    setStatus('manual-debt-status', data.detail, 'error');
+    renderTable('manual-debts-table', [], []);
+    return;
+  }
+  const entries = Array.isArray(data) ? data : [];
+  renderTable('manual-debts-table', [
+    { key: 'amount', label: 'Сумма' },
+    { key: 'description', label: 'Причина / комментарий' },
+    { key: 'created_at', label: 'Добавлено' },
+    { key: 'actions', label: 'Действия' },
+  ], entries.map((entry) => ({ ...entry, actions: '' })), 'Отдельных записей долга нет.');
+  document.querySelectorAll('#manual-debts-table tr').forEach((row, index) => {
+    if (index === 0) return;
+    const entry = entries[index - 1];
+    const cell = row.cells[row.cells.length - 1];
+    if (!entry || !cell) return;
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'button-second';
+    editButton.textContent = 'Изменить';
+    editButton.addEventListener('click', async () => {
+      const amount = prompt('Новая сумма долга:', entry.amount);
+      if (amount === null) return;
+      const description = prompt('Причина / комментарий:', entry.description || '');
+      if (description === null) return;
+      if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+        showToast('Сумма долга должна быть больше нуля.');
+        return;
+      }
+      const result = await orderRequest(`/api/v1/clients/manual-debts/${entry.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ amount: Number(amount), description }),
+      });
+      if (result.detail) { showToast(result.detail); return; }
+      await loadManualDebts(clientId);
+      await loadDebts(document.getElementById('debt-search')?.value || '');
+    });
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'button-second';
+    deleteButton.textContent = 'Удалить';
+    deleteButton.addEventListener('click', async () => {
+      if (!window.confirm(`Удалить запись долга ${formatMoney(entry.amount)}?`)) return;
+      const result = await orderRequest(`/api/v1/clients/manual-debts/${entry.id}`, { method: 'DELETE' });
+      if (result.detail) { showToast(result.detail); return; }
+      await loadManualDebts(clientId);
+      await loadDebts(document.getElementById('debt-search')?.value || '');
+    });
+    cell.append(editButton, deleteButton);
+  });
 }
 
 async function loadDebtDetails(query) {
@@ -975,7 +1117,7 @@ async function loadFinance() {
   } else {
     const overviewNode = document.getElementById('finance-overview');
     if (overviewNode) {
-      overviewNode.innerHTML = `<strong>Общий счет компании: ${formatMoney(overview.company_balance || overview.net_cash)}</strong><br>Приходы денег: ${formatMoney(overview.cash_income)} | Денежные расходы: ${formatMoney(overview.cash_expenses)} | Накладные: ${formatMoney(overview.overheads)} | Зарплата: ${formatMoney(overview.payroll)} | Штрафы: +${formatMoney(overview.penalties)}`;
+      overviewNode.innerHTML = `<strong>Общий счет компании: ${formatMoney(overview.company_balance || overview.net_cash)}</strong><br>Приходы денег: ${formatMoney(overview.cash_income)} | Денежные расходы: ${formatMoney(overview.cash_expenses)} | Заметки вне общего счёта: ${formatMoney(overview.note_expenses)} | Накладные: ${formatMoney(overview.overheads)} | Зарплата: ${formatMoney(overview.payroll)} | Штрафы: +${formatMoney(overview.penalties)}`;
     }
   }
   const transactionOffset = state.financeTransactionsPage * 10;
@@ -991,8 +1133,14 @@ async function loadFinance() {
     { key: 'payment_method', label: 'Способ оплаты' },
     { key: 'counterparty_name', label: 'Контрагент' },
     { key: 'description', label: 'Комментарий' },
+    { key: 'accounting_scope', label: 'Учёт' },
     { key: 'created_at', label: 'Дата' },
-  ], transactionRows);
+  ], transactionRows.map((row) => ({
+    ...row,
+    accounting_scope: row.type === 'Расход денег' && row.is_company_expense === false
+      ? 'Заметка, вне общего счёта'
+      : 'Общий счёт компании',
+  })));
   const overheadOffset = state.financeOverheadsPage * 10;
   const overheadParams = new URLSearchParams({ limit: '10', offset: String(overheadOffset) });
   if (dateFrom) overheadParams.set('date_from', dateFrom);
@@ -1074,6 +1222,7 @@ async function loadReports() {
     { key: 'payroll', label: 'Зарплата' },
     { key: 'cash_income', label: 'Приходы денег' },
     { key: 'cash_expenses', label: 'Расходы денег' },
+    { key: 'note_expenses', label: 'Заметки вне общего счёта' },
     { key: 'company_balance', label: 'Общий счет компании' },
     { key: 'profit', label: 'Прибыль' },
   ], [summary]);
@@ -1149,6 +1298,56 @@ function renderSalesChart(chartData) {
       <div class="pie-legend"><div class="pie-legend-title">Распределение выручки</div>${legend}${lossWarning}</div>
     </div>
   `;
+}
+
+async function loadSellerPerformanceOptions() {
+  const select = document.getElementById('seller-performance-select');
+  if (!select) return;
+  const employees = await fetchJson('/api/v1/dashboard/sellers');
+  if (!Array.isArray(employees)) return;
+  const selectedId = select.value;
+  select.innerHTML = '<option value="">Выберите сотрудника</option>' + employees.map((employee) =>
+    `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)}${employee.is_active ? '' : ' (архив)'}</option>`
+  ).join('');
+  if (employees.some((employee) => String(employee.id) === selectedId)) select.value = selectedId;
+  select.onchange = loadSellerPerformance;
+  if (select.value) await loadSellerPerformance();
+}
+
+async function loadSellerPerformance() {
+  const select = document.getElementById('seller-performance-select');
+  const summary = document.getElementById('seller-performance-summary');
+  const sellerId = Number(select?.value || 0);
+  if (!sellerId) {
+    if (summary) summary.textContent = 'Выберите сотрудника.';
+    renderTable('seller-referrers-table', [], []);
+    renderTable('seller-orders-table', [], []);
+    return;
+  }
+  const params = new URLSearchParams({ seller_id: String(sellerId) });
+  const dateFrom = document.getElementById('dashboard-date-from')?.value;
+  const dateTo = document.getElementById('dashboard-date-to')?.value;
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  const data = await fetchJson(`/api/v1/dashboard/seller-performance?${params.toString()}`);
+  if (data?.detail) {
+    if (summary) summary.textContent = `Ошибка: ${data.detail}`;
+    return;
+  }
+  if (summary) summary.textContent = `${data.seller_name}: продано на ${formatMoney(data.total_amount)} · доставленных продаж: ${data.sales_count}`;
+  renderTable('seller-referrers-table', [
+    { key: 'referrer_name', label: 'Кто дал клиента' },
+    { key: 'total_amount', label: 'Сумма продаж' },
+    { key: 'sales_count', label: 'Заявок' },
+  ], data.by_referrer || [], 'Нет продаж с указанным источником.');
+  renderTable('seller-orders-table', [
+    { key: 'order_id', label: 'Заявка' },
+    { key: 'client_name', label: 'Клиент' },
+    { key: 'referrer_name', label: 'Кто дал клиента' },
+    { key: 'items', label: 'Проданные товары' },
+    { key: 'total_amount', label: 'Сумма' },
+    { key: 'created_at', label: 'Дата продажи' },
+  ], data.orders || [], 'У сотрудника пока нет доставленных продаж.');
 }
 
 async function loadDashboard() {
@@ -1257,6 +1456,16 @@ async function loadDashboard() {
     data.sales_by_seller || [],
     'Нет продаж по продавцам.'
   );
+  const sellerBars = document.getElementById('seller-sales-bars');
+  if (sellerBars) {
+    const sellerRows = data.sales_by_seller || [];
+    const maxAmount = Math.max(0, ...sellerRows.map((row) => Number(row.total_amount || 0)));
+    sellerBars.innerHTML = sellerRows.length ? sellerRows.map((row) => {
+      const amount = Number(row.total_amount || 0);
+      const width = maxAmount > 0 ? Math.max(2, amount / maxAmount * 100) : 0;
+      return `<div class="seller-sales-bar-row"><span class="seller-sales-bar-name">${escapeHtml(row.seller_name)}</span><span class="seller-sales-bar-track"><i style="width:${width.toFixed(1)}%"></i></span><strong>${escapeHtml(formatMoney(amount))}</strong></div>`;
+    }).join('') : '<div class="help-text">Нет продаж по продавцам за выбранный период.</div>';
+  }
   renderTable(
     'top-referrers-table',
     [
@@ -1289,13 +1498,16 @@ async function loadDashboard() {
   });
 }
 
-bindIfExists('dashboard-period-apply', loadDashboard);
+bindIfExists('dashboard-period-apply', async () => {
+  await loadDashboard();
+  await loadSellerPerformance();
+});
 bindIfExists('dashboard-period-reset', () => {
   const from = document.getElementById('dashboard-date-from');
   const to = document.getElementById('dashboard-date-to');
   if (from) from.value = '';
   if (to) to.value = '';
-  return loadDashboard();
+  return Promise.all([loadDashboard(), loadSellerPerformance()]);
 });
 
 function renderTable(tableId, columns, rows, emptyText = 'Данные отсутствуют.') {
@@ -1368,7 +1580,13 @@ function bindItemPriceEditors() {
         const value = prompt(`Базовая цена для ${item.name}:`, item.price || '0');
         if (value === null || Number(value) < 0 || value.trim() === '') return;
         const result = await orderRequest(`/api/v1/inventory/items/${item.id}/price`, { method: 'PATCH', body: JSON.stringify({ price: value }) });
-        if (result.detail) showToast(result.detail); else { item.price = result.price; loadOrderForm(); renderWarehouseTables(); }
+        if (result.detail) { showToast(result.detail); } else {
+          item.price = result.price;
+          item.sale_price = result.sale_price ?? result.price;
+          item.purchase_cost = result.purchase_cost ?? item.purchase_cost ?? '0';
+          loadOrderForm();
+          renderWarehouseTables();
+        }
       });
       const nameCell = row.insertCell();
       nameCell.innerHTML = `<button type="button" class="button-second edit-item-name" data-item-id="${escapeHtml(item.id)}">Изменить имя</button>`;
@@ -1525,6 +1743,8 @@ function renderWarehouseTables() {
     { key: 'unit', label: 'Ед.' },
     { key: 'warehouse_name', label: 'Склад' },
     { key: 'remaining_qty', label: 'Остаток' },
+    { key: 'remaining_cost_value', label: 'Остаток по себестоимости' },
+    { key: 'remaining_sale_value', label: 'Остаток по цене продажи' },
   ];
   const stockRows = [...(window.stockSummary || [])].sort((left, right) =>
     `${left.warehouse_name}|${left.item_code}|${left.item_name}`.localeCompare(
@@ -1535,9 +1755,18 @@ function renderWarehouseTables() {
   renderTable('stock-summary-table', stockColumns, stockRows);
   const selectedWarehouse = document.getElementById('stock-summary-warehouse-filter')?.selectedOptions[0]?.textContent || 'Все склады';
   const stockStatus = document.getElementById('stock-summary-selection');
+  const totalCostValue = stockRows.reduce((sum, row) => sum + Number(row.remaining_cost_value || 0), 0);
+  const totalSaleValue = stockRows.reduce((sum, row) => sum + Number(row.remaining_sale_value || 0), 0);
+  const totalDiffValue = totalSaleValue - totalCostValue;
+  const totalCostNode = document.getElementById('warehouse-total-cost');
+  const totalSaleNode = document.getElementById('warehouse-total-sale');
+  const totalDiffNode = document.getElementById('warehouse-total-diff');
   if (stockStatus) {
-    stockStatus.textContent = `Выбрано: ${selectedWarehouse}. Позиций: ${stockRows.length}.`;
+    stockStatus.textContent = `Выбрано: ${selectedWarehouse}. Позиций: ${stockRows.length}. Остаток по себестоимости: ${formatMoney(totalCostValue)}. Остаток по цене продажи: ${formatMoney(totalSaleValue)}.`;
   }
+  if (totalCostNode) totalCostNode.textContent = formatMoney(totalCostValue);
+  if (totalSaleNode) totalSaleNode.textContent = formatMoney(totalSaleValue);
+  if (totalDiffNode) totalDiffNode.textContent = formatMoney(totalDiffValue);
   renderTable('stock-history-table', [
     { key: 'timestamp', label: 'Дата' },
     { key: 'warehouse_name', label: 'Склад' },
@@ -1863,13 +2092,15 @@ document.addEventListener('DOMContentLoaded', () => {
   bindIfExists('create-order', async () => {
     const items = Array.from(document.querySelectorAll('.order-line')).map((line) => ({ item_id: Number(line.querySelector('.order-product').value), quantity: line.querySelector('.order-quantity').value, price: line.querySelector('.order-price').value, discount_percent: line.querySelector('.order-discount').value || 0 })).filter((item) => item.quantity && item.price !== '');
     const editingId = window.editingOrderId;
-    const result = await orderRequest(editingId ? `/api/v1/orders/${editingId}` : '/api/v1/orders', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify({ client_id: Number(document.getElementById('order-client').value), referred_by: document.getElementById('order-referred-by')?.value || null, items }) });
+    const referrerSelect = document.getElementById('order-referred-by');
+    const result = await orderRequest(editingId ? `/api/v1/orders/${editingId}` : '/api/v1/orders', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify({ client_id: Number(document.getElementById('order-client').value), referred_by_user_id: Number(referrerSelect?.value) || null, referred_by: referrerSelect?.value ? null : (referrerSelect?.dataset.legacyReferrer || null), items }) });
     setStatus('order-create-status', result.detail || `Заявка №${result.id} создана.`, result.detail ? 'error' : 'success');
     if (!result.detail) {
       window.editingOrderId = null;
       document.getElementById('create-order').textContent = 'Создать заявку';
       document.getElementById('order-client').selectedIndex = -1;
       document.getElementById('order-referred-by').value = '';
+      document.getElementById('order-referred-by').dataset.legacyReferrer = '';
       document.getElementById('order-lines').innerHTML = '';
       await loadOrders('PENDING');
     }
@@ -1877,6 +2108,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const debtSearch = document.getElementById('debt-search');
   debtSearch?.addEventListener('input', () => loadDebts(debtSearch.value));
   document.getElementById('debt-as-of')?.addEventListener('change', () => loadDebts(debtSearch?.value || ''));
+  bindIfExists('add-manual-debt', async () => {
+    const clientId = Number(document.getElementById('manual-debt-client')?.value || 0);
+    const amount = Number(document.getElementById('manual-debt-amount')?.value || 0);
+    const description = document.getElementById('manual-debt-description')?.value.trim() || '';
+    if (!clientId || !Number.isFinite(amount) || amount <= 0) {
+      setStatus('manual-debt-status', 'Выберите клиента и укажите сумму больше нуля.', 'error');
+      return;
+    }
+    const result = await orderRequest('/api/v1/clients/manual-debts', {
+      method: 'POST',
+      body: JSON.stringify({ client_id: clientId, amount, description }),
+    });
+    if (result.detail) {
+      setStatus('manual-debt-status', result.detail, 'error');
+      return;
+    }
+    document.getElementById('manual-debt-amount').value = '';
+    document.getElementById('manual-debt-description').value = '';
+    setStatus('manual-debt-status', `Запись долга добавлена: ${formatMoney(result.amount)}.`, 'success');
+    await loadManualDebts(clientId);
+    await loadDebts(debtSearch?.value || '');
+  });
   bindIfExists('create-user', async () => {
     const permissions = Array.from(document.querySelectorAll('#user-permissions input:checked')).map((input) => input.value);
     const result = await orderRequest('/api/v1/users', { method: 'POST', body: JSON.stringify({ username: document.getElementById('user-username').value, password: document.getElementById('user-password').value, full_name: document.getElementById('user-full-name').value, role: document.getElementById('user-role').value, can_change_status: document.getElementById('user-can-change-status').checked, permissions }) });
@@ -2392,9 +2645,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const name = document.getElementById('new-item-name').value.trim();
       const type = document.getElementById('new-item-type').value;
       const unit = document.getElementById('new-item-unit').value.trim();
+      const price = Number(document.getElementById('new-item-price')?.value ?? 0);
       const minStock = Number(document.getElementById('new-item-min-stock').value);
       if (!code || !name || !type || !unit) {
         setStatus('warehouse-response', 'Заполните код, имя, тип и единицу товара.');
+        if (btn) { btn.disabled = false; btn.textContent = oldText; }
+        return;
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        setStatus('warehouse-response', 'Базовая цена должна быть неотрицательным числом.', 'error');
         if (btn) { btn.disabled = false; btn.textContent = oldText; }
         return;
       }
@@ -2402,7 +2661,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await fetchJson('/api/v1/inventory/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, name, type, unit, min_stock: minStock }),
+        body: JSON.stringify({ code, name, type, unit, min_stock: minStock, price }),
       });
       if (result?.detail) {
         setStatus('warehouse-response', `Ошибка: ${result.detail}`, 'error');
@@ -2414,9 +2673,15 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('new-item-code').value = '';
       document.getElementById('new-item-name').value = '';
       document.getElementById('new-item-unit').value = 'шт';
+      document.getElementById('new-item-price').value = '0';
       document.getElementById('new-item-min-stock').value = '0';
       window.inventoryItems = window.inventoryItems || [];
-      window.inventoryItems.push(result);
+      window.inventoryItems.push({
+        ...result,
+        price: result.price || '0',
+        sale_price: result.sale_price ?? result.price ?? '0',
+        purchase_cost: result.purchase_cost ?? '0',
+      });
       await loadWarehouseTables();
       if (window.nextViewAfterCreate) {
         showView(window.nextViewAfterCreate);

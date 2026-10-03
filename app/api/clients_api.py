@@ -9,10 +9,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_dependencies import require_section, user_permissions
+from app.api.auth_dependencies import require_roles, require_section, user_permissions
 from app.db import async_session
 from app.models.schema import User
-from app.models.schema import CashTransaction, Counterparty, Item, PaymentMethod, Sale, SaleItem
+from app.models.schema import CashTransaction, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
 from app.services.sales import repay_client_debt
 from app.services.timezone import get_app_timezone
@@ -73,6 +73,23 @@ class ClientPaymentResponse(BaseModel):
     allocations: list[dict[str, str | int]]
 
 
+class ManualDebtRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    description: str = Field(default="", max_length=500)
+
+
+class ManualDebtCreateRequest(ManualDebtRequest):
+    client_id: int = Field(gt=0)
+
+
+class ManualDebtResponse(BaseModel):
+    id: int
+    client_id: int
+    amount: str
+    description: str
+    created_at: str
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         yield session
@@ -102,13 +119,23 @@ async def list_clients(
             CashTransaction.amount > 0,
             CashTransaction.created_at <= end_of_day,
         ).scalar_subquery()
-        debt_total = (sales_total - paid_total)
+        manual_debt_total = select(func.coalesce(func.sum(ManualDebt.amount), 0)).where(
+            ManualDebt.counterparty_id == Counterparty.id,
+            ManualDebt.created_at <= end_of_day,
+        ).scalar_subquery()
+        debt_total = sales_total - paid_total + manual_debt_total
     else:
-        debt_total = (
+        sales_debt_total = (
             select(func.coalesce(func.sum(Sale.debt_amount), 0))
             .where(Sale.counterparty_id == Counterparty.id)
             .scalar_subquery()
         )
+        manual_debt_total = (
+            select(func.coalesce(func.sum(ManualDebt.amount), 0))
+            .where(ManualDebt.counterparty_id == Counterparty.id)
+            .scalar_subquery()
+        )
+        debt_total = sales_debt_total + manual_debt_total
     stmt = select(Counterparty, debt_total.label("debt_total")).order_by(Counterparty.name, Counterparty.id)
     if q and q.strip():
         search = f"%{q.strip()}%"
@@ -181,12 +208,15 @@ async def client_history(
     calculated_debt = await session.scalar(
         select(func.coalesce(func.sum(Sale.debt_amount), 0)).where(Sale.counterparty_id == client_id)
     )
+    manual_debt_total = await session.scalar(
+        select(func.coalesce(func.sum(ManualDebt.amount), 0)).where(ManualDebt.counterparty_id == client_id)
+    )
     return ClientHistoryResponse(
         client=ClientResponse(
             id=client.id,
             name=client.name,
             phone=client.phone,
-            current_debt=str(calculated_debt or 0),
+            current_debt=str((calculated_debt or 0) + (manual_debt_total or 0)),
         ),
         sales=[ClientSaleHistoryResponse(
             id=sale.id,
@@ -206,6 +236,90 @@ async def client_history(
         sales_total=str(sales_total or 0),
         paid_total=str(paid_total or 0),
     )
+
+
+@router.get("/{client_id}/manual-debts", response_model=list[ManualDebtResponse])
+async def list_manual_debts(
+    client_id: int,
+    _: User = Depends(require_roles("ADMIN")),
+    session: AsyncSession = session_dependency,
+) -> list[ManualDebtResponse]:
+    if await session.get(Counterparty, client_id) is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    entries = (await session.execute(
+        select(ManualDebt)
+        .where(ManualDebt.counterparty_id == client_id)
+        .order_by(ManualDebt.created_at.desc(), ManualDebt.id.desc())
+    )).scalars().all()
+    return [ManualDebtResponse(
+        id=entry.id,
+        client_id=entry.counterparty_id,
+        amount=str(entry.amount),
+        description=entry.description,
+        created_at=entry.created_at.isoformat(),
+    ) for entry in entries]
+
+
+@router.post("/manual-debts", response_model=ManualDebtResponse)
+async def create_manual_debt(
+    request: ManualDebtCreateRequest,
+    _: User = Depends(require_roles("ADMIN")),
+    session: AsyncSession = session_dependency,
+) -> ManualDebtResponse:
+    if await session.get(Counterparty, request.client_id) is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    entry = ManualDebt(
+        counterparty_id=request.client_id,
+        amount=request.amount,
+        description=request.description.strip(),
+    )
+    session.add(entry)
+    await session.commit()
+    await session.refresh(entry)
+    return ManualDebtResponse(
+        id=entry.id,
+        client_id=entry.counterparty_id,
+        amount=str(entry.amount),
+        description=entry.description,
+        created_at=entry.created_at.isoformat(),
+    )
+
+
+@router.put("/manual-debts/{debt_id}", response_model=ManualDebtResponse)
+async def update_manual_debt(
+    debt_id: int,
+    request: ManualDebtRequest,
+    _: User = Depends(require_roles("ADMIN")),
+    session: AsyncSession = session_dependency,
+) -> ManualDebtResponse:
+    entry = await session.get(ManualDebt, debt_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Запись долга не найдена")
+    entry.amount = request.amount
+    entry.description = request.description.strip()
+    await session.commit()
+    await session.refresh(entry)
+    return ManualDebtResponse(
+        id=entry.id,
+        client_id=entry.counterparty_id,
+        amount=str(entry.amount),
+        description=entry.description,
+        created_at=entry.created_at.isoformat(),
+    )
+
+
+@router.delete("/manual-debts/{debt_id}")
+async def delete_manual_debt(
+    debt_id: int,
+    _: User = Depends(require_roles("ADMIN")),
+    session: AsyncSession = session_dependency,
+) -> dict[str, int | bool]:
+    entry = await session.get(ManualDebt, debt_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Запись долга не найдена")
+    await session.delete(entry)
+    await session.commit()
+    return {"id": debt_id, "deleted": True}
 
 
 @router.post("/{client_id}/payments", response_model=ClientPaymentResponse)

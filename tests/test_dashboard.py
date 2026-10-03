@@ -13,6 +13,7 @@ from app.models.schema import (
     Item,
     ItemType,
     Order,
+    OrderItem,
     OverheadExpense,
     PaymentMethod,
     Sale,
@@ -22,6 +23,7 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.dashboard import build_dashboard_summary
+from app.api.dashboard_api import seller_performance
 from app.services.timezone import get_app_timezone
 
 
@@ -357,6 +359,46 @@ async def test_dashboard_tracks_seller_sales_referrers_and_note_expenses():
         assert summary["note_expenses"] == Decimal("40.00")
         assert summary["cash_expenses"] == Decimal("30.00")
         assert summary["company_balance"] == Decimal("-30.00")
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_seller_performance_groups_sales_by_employee_referrer_and_lists_products():
+    engine, AsyncSessionLocal = await _setup_db()
+    async with AsyncSessionLocal() as session:
+        seller = User(username="seller-report", password_hash="hash", full_name="Seller Report", role="COURIER")
+        referrer = User(username="referrer-report", password_hash="hash", full_name="Referrer Report", role="AGENT")
+        client = Counterparty(name="Seller Report Client")
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        item = Item(code="SELLER-REPORT-1", name="Report Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        batch = Batch(item=item, warehouse=warehouse, purchase_cost=Decimal("4.00"), initial_qty=Decimal("5"), remaining_qty=Decimal("5"))
+        sale = Sale(counterparty=client, total_amount=Decimal("24.00"), paid_amount=Decimal("24.00"), debt_amount=Decimal("0.00"))
+        order = Order(
+            courier=seller,
+            client=client,
+            sale_id=1,
+            referred_by=referrer.full_name,
+            referred_by_user_id=1,
+            status="DELIVERED",
+            invoice_number="20260930-9001",
+        )
+        order_item = OrderItem(order=order, item=item, quantity=Decimal("3"), price=Decimal("8.00"), discount=Decimal("0.00"))
+        sale_item = SaleItem(sale=sale, item=item, batch=batch, qty=Decimal("3"), unit_price=Decimal("8.00"), cost_price=Decimal("4.00"))
+        session.add_all([seller, referrer, client, warehouse, item, batch, sale, order, order_item, sale_item])
+        await session.flush()
+        order.sale_id = sale.id
+        order.referred_by_user_id = referrer.id
+        await session.flush()
+
+        report = await seller_performance(seller.id, None, None, session)
+
+        assert report["seller_name"] == "Seller Report"
+        assert report["total_amount"] == Decimal("24.00")
+        assert report["sales_count"] == 1
+        assert report["by_referrer"][0]["referrer_name"] == "Referrer Report"
+        assert report["by_referrer"][0]["total_amount"] == Decimal("24.00")
+        assert report["orders"][0]["items"] == "Report Product × 3 pcs"
 
     await engine.dispose()
 

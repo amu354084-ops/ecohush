@@ -236,6 +236,7 @@ async def ensure_sqlite_rbac_order_fields(conn) -> None:
         ("users", "permissions", "TEXT"),
         ("order_items", "discount", "NUMERIC(18, 2) NOT NULL DEFAULT 0"),
         ("orders", "sale_id", "INTEGER REFERENCES sales(id)"),
+        ("orders", "referred_by_user_id", "INTEGER REFERENCES users(id)"),
         ("items", "price", "NUMERIC(18, 4) NOT NULL DEFAULT 0"),
         ("cash_transactions", "is_company_expense", "BOOLEAN NOT NULL DEFAULT 1"),
     )
@@ -244,6 +245,13 @@ async def ensure_sqlite_rbac_order_fields(conn) -> None:
         columns = {row[1] for row in result.fetchall()}
         if column not in columns:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+    await conn.execute(text(
+        "UPDATE orders SET referred_by_user_id = ("
+        "SELECT MIN(id) FROM users "
+        "WHERE lower(trim(coalesce(nullif(full_name, ''), username))) = lower(trim(orders.referred_by)) "
+        "HAVING COUNT(*) = 1) "
+        "WHERE referred_by_user_id IS NULL AND referred_by IS NOT NULL AND trim(referred_by) <> ''"
+    ))
 
 
 async def ensure_sqlite_inventory_indexes(conn) -> None:
@@ -260,6 +268,7 @@ async def ensure_sqlite_inventory_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_cash_transactions_created_at ON cash_transactions (created_at)",
         "CREATE INDEX IF NOT EXISTS ix_counterparties_name ON counterparties (name)",
         "CREATE INDEX IF NOT EXISTS ix_sales_counterparty_created ON sales (counterparty_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_orders_referred_by_user_id ON orders (referred_by_user_id)",
         "CREATE INDEX IF NOT EXISTS ix_cash_transactions_counterparty_created "
         "ON cash_transactions (counterparty_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_shipments_warehouse_created ON shipments (warehouse_id, created_at)",

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
@@ -16,6 +17,7 @@ from app.models.schema import (
     OrderItem,
     OrderPaymentType,
     OrderStatus,
+    Sale,
     User,
     WarehouseType,
 )
@@ -31,6 +33,7 @@ async def create_order(
     client_id: int,
     items: list[dict[str, Any]],
     referred_by: str | None = None,
+    referred_by_user_id: int | None = None,
 ) -> Order:
     if not items:
         raise ValueError("At least one order item is required")
@@ -40,11 +43,13 @@ async def create_order(
     client = await session.get(Counterparty, client_id)
     if client is None:
         raise ValueError("Client not found")
+    referrer_name, referrer_user_id = await _resolve_referrer(session, referred_by, referred_by_user_id)
 
     order = Order(
         courier_id=courier_id,
         client_id=client_id,
-        referred_by=(referred_by or "").strip() or None,
+        referred_by=referrer_name,
+        referred_by_user_id=referrer_user_id,
         status=OrderStatus.PENDING,
     )
     session.add(order)
@@ -90,17 +95,20 @@ async def update_order(
     client_id: int,
     items: list[dict[str, Any]],
     referred_by: str | None = None,
+    referred_by_user_id: int | None = None,
 ) -> Order:
     order = await _get_order(session, order_id)
-    if order.status not in {OrderStatus.PENDING, OrderStatus.ACCEPTED, OrderStatus.REJECTED}:
-        raise ValueError("Заявку можно изменять только до передачи в путь")
+    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED}:
+        raise ValueError("Заявку можно изменять только до одобрения или до передачи в путь")
     client = await session.get(Counterparty, client_id)
     if client is None:
         raise ValueError("Client not found")
+    referrer_name, referrer_user_id = await _resolve_referrer(session, referred_by, referred_by_user_id)
     if not items:
         raise ValueError("At least one order item is required")
     order.client_id = client_id
-    order.referred_by = (referred_by or "").strip() or None
+    order.referred_by = referrer_name
+    order.referred_by_user_id = referrer_user_id
     order.rejection_reason = None
     await session.execute(delete(OrderItem).where(OrderItem.order_id == order.id))
     for item_data in items:
@@ -132,10 +140,23 @@ async def update_order(
     return order
 
 
+async def _resolve_referrer(
+    session: AsyncSession,
+    referred_by: str | None,
+    referred_by_user_id: int | None,
+) -> tuple[str | None, int | None]:
+    if referred_by_user_id is None:
+        return (referred_by or "").strip() or None, None
+    employee = await session.get(User, referred_by_user_id)
+    if employee is None or not employee.is_active:
+        raise ValueError("Выбранный сотрудник, который дал клиента, не найден или неактивен")
+    return employee.full_name or employee.username, employee.id
+
+
 async def delete_order(session: AsyncSession, order_id: int) -> None:
     order = await _get_order(session, order_id)
-    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED}:
-        raise ValueError("Удалять можно только заявку до одобрения")
+    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED, OrderStatus.IN_TRANSIT}:
+        raise ValueError("Удалять можно только заявку в статусах: ожидание, отклонена или в пути")
     await session.delete(order)
     await session.flush()
 
@@ -144,7 +165,7 @@ async def reverse_delivered_order(session: AsyncSession, order: Order) -> None:
     if order.status != OrderStatus.DELIVERED:
         return
     if order.sale_id is None:
-        raise ValueError("Для этой доставленной заявки не найдена связанная продажа")
+        order.sale_id = await _recover_legacy_sale_id(session, order)
     await process_return(
         session=session,
         sale_id=order.sale_id,
@@ -158,6 +179,66 @@ async def reverse_delivered_order(session: AsyncSession, order: Order) -> None:
     order.delivered_at = None
     order.discount_amount = Decimal(0)
     await session.flush()
+
+
+async def _recover_legacy_sale_id(session: AsyncSession, order: Order) -> int:
+    if order.client_id is None or order.delivered_at is None or order.payment_type is None:
+        raise ValueError("Для этой доставленной заявки не найдена однозначная связанная продажа")
+    await session.refresh(order, attribute_names=["items"])
+
+    expected_total = max(
+        Decimal(0),
+        sum((item.quantity * item.price - (item.discount or Decimal(0)) for item in order.items), Decimal(0))
+        - (order.discount_amount or Decimal(0)),
+    ).quantize(Decimal("0.01"))
+    expected_payment_method = PaymentMethod.BANK if order.payment_type == OrderPaymentType.BANK else PaymentMethod.CASH
+    delivered_at = order.delivered_at
+    delivered_at_utc = (
+        delivered_at.replace(tzinfo=get_app_timezone()).astimezone(timezone.utc)
+        if delivered_at.tzinfo is None else delivered_at.astimezone(timezone.utc)
+    )
+    expected_items = sorted(
+        (
+            item.item_id,
+            item.quantity.quantize(Decimal("0.0001")),
+            item.price.quantize(Decimal("0.0001")),
+            (
+                (item.discount or Decimal(0)) / (item.quantity * item.price) * Decimal(100)
+                if item.quantity * item.price else Decimal(0)
+            ).quantize(Decimal("0.01")),
+        )
+        for item in order.items
+    )
+
+    sales = (await session.execute(
+        select(Sale)
+        .options(selectinload(Sale.sale_items))
+        .where(Sale.counterparty_id == order.client_id, Sale.total_amount == expected_total)
+        .where(~exists().where(Order.sale_id == Sale.id))
+    )).scalars().all()
+    matches: list[Sale] = []
+    for sale in sales:
+        if sale.payment_method != expected_payment_method.value:
+            continue
+        created_at = sale.created_at
+        created_at_utc = created_at.replace(tzinfo=timezone.utc) if created_at.tzinfo is None else created_at.astimezone(timezone.utc)
+        if abs(delivered_at_utc - created_at_utc) > timedelta(minutes=5):
+            continue
+        actual_items = sorted(
+            (
+                item.item_id,
+                item.qty.quantize(Decimal("0.0001")),
+                item.unit_price.quantize(Decimal("0.0001")),
+                item.discount_percent.quantize(Decimal("0.01")),
+            )
+            for item in sale.sale_items
+        )
+        if actual_items == expected_items:
+            matches.append(sale)
+
+    if len(matches) != 1:
+        raise ValueError("Для этой доставленной заявки не найдена однозначная связанная продажа")
+    return matches[0].id
 
 
 async def accept_order(session: AsyncSession, order_id: int, discount_amount: Decimal = Decimal(0)) -> Order:

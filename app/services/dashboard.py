@@ -11,8 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
     Batch,
-    CashTransaction,
-    CashTransactionType,
     Counterparty,
     Item,
     ItemType,
@@ -260,18 +258,6 @@ async def build_dashboard_summary(
         }
         for row in top_referrers_result
     ]
-
-    note_expenses = Decimal(
-        (
-            await session.execute(
-                select(func.coalesce(func.sum(CashTransaction.amount), 0)).where(
-                    CashTransaction.type == CashTransactionType.EXPENSE,
-                    CashTransaction.is_company_expense.is_(False),
-                )
-            )
-        ).scalar()
-        or 0
-    ).quantize(Decimal("0.01"))
 
     chart_values = [
         {"key": "cogs", "label": "Себестоимость", "value": pnl["cogs"], "color": "#EF4444"},

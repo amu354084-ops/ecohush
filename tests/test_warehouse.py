@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.models.schema import Batch, Item, ItemType, StockTransaction, StockTransactionType, Warehouse, WarehouseType
-from app.services.inventory import adjust_stock
+from app.services.inventory import adjust_stock, get_stock_summary
 from app.services.warehouse_ops import add_stock, move_stock
 
 
@@ -18,6 +18,7 @@ async def _setup_items(session):
         item_id=item.id,
         warehouse_id=warehouse1.id,
         purchase_cost=Decimal("5.00"),
+        sale_price=Decimal("8.00"),
         initial_qty=Decimal("10.00"),
         remaining_qty=Decimal("10.00"),
     )
@@ -120,12 +121,59 @@ async def test_move_stock_records_transfer_transactions(session):
     assert destination_batch.remaining_qty == Decimal("2.00")
 
     source_txns = await session.execute(
-        select(StockTransaction)
-        .where(StockTransaction.batch_id == source_batch.id)
+        select(StockTransaction).where(StockTransaction.batch_id == source_batch.id)
     )
     destination_txns = await session.execute(
-        select(StockTransaction)
-        .where(StockTransaction.batch_id == destination_batch.id)
+        select(StockTransaction).where(StockTransaction.batch_id == destination_batch.id)
     )
     assert any(txn.type == StockTransactionType.TRANSFER_OUT for txn in source_txns.scalars().all())
     assert any(txn.type == StockTransactionType.TRANSFER_IN for txn in destination_txns.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_stock_summary_values_remaining_inventory_at_batch_cost(session):
+    item, warehouse1, _, _ = await _setup_items(session)
+    session.add(Batch(
+        item_id=item.id,
+        warehouse_id=warehouse1.id,
+        purchase_cost=Decimal("7.00"),
+        sale_price=Decimal("12.00"),
+        initial_qty=Decimal("4.00"),
+        remaining_qty=Decimal("4.00"),
+    ))
+    await session.flush()
+
+    rows = await get_stock_summary(session, warehouse1.id)
+
+    assert len(rows) == 1
+    assert Decimal(rows[0]["remaining_qty"]) == Decimal("14.00")
+    assert Decimal(rows[0]["remaining_cost_value"]) == Decimal("78.00")
+    assert Decimal(rows[0]["remaining_sale_value"]) == Decimal("128.00")
+
+
+@pytest.mark.asyncio
+async def test_stock_summary_falls_back_to_item_price_when_batch_sale_price_is_zero(session):
+    item = Item(
+        code="PRICE-FALLBACK",
+        name="Fallback Price",
+        type=ItemType.FINAL,
+        unit="pcs",
+        price=Decimal("25.00"),
+    )
+    warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="finished")
+    session.add_all([item, warehouse])
+    await session.flush()
+    session.add(Batch(
+        item_id=item.id,
+        warehouse_id=warehouse.id,
+        purchase_cost=Decimal("10.00"),
+        sale_price=Decimal("0.00"),
+        initial_qty=Decimal("4.00"),
+        remaining_qty=Decimal("4.00"),
+    ))
+    await session.flush()
+
+    rows = await get_stock_summary(session, warehouse.id)
+
+    assert len(rows) == 1
+    assert Decimal(rows[0]["remaining_sale_value"]) == Decimal("100.00")

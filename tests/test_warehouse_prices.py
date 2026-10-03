@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.schema import Base, Batch, Item, ItemType, PaymentMethod, Warehouse, WarehouseType
-from app.api.inventory_api import UpdateBatchPricesRequest, update_batch_prices
+from app.api.inventory_api import CreateItemRequest, UpdateBatchPricesRequest, create_item, update_batch_prices
 from app.services.sales import checkout_sale
 from app.services.warehouse_ops import add_stock, move_stock
 
@@ -104,6 +104,30 @@ async def test_incoming_requires_explicit_purchase_cost():
         await session.flush()
         with pytest.raises(ValueError, match="Себестоимость|purchase cost|Cost"):
             await add_stock(session, item.id, warehouse.id, Decimal("5"), Decimal("0"), sale_price=Decimal("29.00"))
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_item_returns_price_as_sale_price_when_no_batch_exists():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        result = await create_item(
+            CreateItemRequest(
+                code="PRICE-NEW",
+                name="New Price Item",
+                type=ItemType.FINAL,
+                unit="pcs",
+                min_stock=0,
+                price=Decimal("42.50"),
+            ),
+            session,
+        )
+        assert Decimal(result.price) == Decimal("42.50")
+        assert Decimal(result.sale_price) == Decimal("42.50")
+        assert Decimal(result.purchase_cost) == Decimal("0")
     await engine.dispose()
 
 

@@ -40,6 +40,7 @@ class OrderCreateRequest(BaseModel):
     client_id: int = Field(gt=0)
     items: list[OrderItemRequest] = Field(min_length=1)
     referred_by: str | None = Field(default=None, max_length=255)
+    referred_by_user_id: int | None = Field(default=None, gt=0)
 
 
 class AcceptRequest(BaseModel):
@@ -159,6 +160,17 @@ async def order_catalog(_: User = Depends(require_section("orders")), session: A
     return catalog
 
 
+@router.get("/orders/referrers")
+async def list_order_referrers(
+    _: User = Depends(require_section("orders")),
+    session: AsyncSession = Depends(get_session),
+):
+    employees = (await session.execute(
+        select(User).where(User.is_active.is_(True)).order_by(User.full_name, User.username)
+    )).scalars().all()
+    return [{"id": employee.id, "name": employee.full_name or employee.username} for employee in employees]
+
+
 @router.get("/users")
 async def list_users(_: User = Depends(require_roles("ADMIN")), session: AsyncSession = Depends(get_session)):
     users = (await session.execute(select(User).order_by(User.username))).scalars().all()
@@ -263,9 +275,40 @@ async def delete_user(user_id: int, admin: User = Depends(require_roles("ADMIN")
 
 @router.post("/orders")
 async def create(data: OrderCreateRequest, user: User = Depends(require_section("orders")), session: AsyncSession = Depends(get_session)):
-    order = await create_order(session, user.id, data.client_id, [item.model_dump() for item in data.items], data.referred_by)
+    order = await create_order(
+        session, user.id, data.client_id, [item.model_dump() for item in data.items],
+        data.referred_by, data.referred_by_user_id,
+    )
     await session.commit()
     return {"id": order.id, "status": order.status}
+
+
+def build_order_query(
+    *,
+    status: OrderStatus | None,
+    seller_id: int | None,
+    user: User,
+    limit: int = 10,
+    offset: int = 0,
+):
+    query = select(Order).options(
+        selectinload(Order.client),
+        selectinload(Order.courier),
+        selectinload(Order.referrer),
+        selectinload(Order.items).selectinload(OrderItem.item),
+    ).order_by(Order.created_at.desc(), Order.id.desc())
+
+    if user.role != "ADMIN":
+        if seller_id is not None and seller_id != user.id:
+            raise ValueError("У пользователя доступ только к своим заказам")
+        query = query.where(Order.courier_id == user.id)
+    elif seller_id is not None:
+        query = query.where(Order.courier_id == seller_id)
+
+    if status is not None:
+        query = query.where(Order.status == status)
+
+    return query.limit(max(1, min(limit, 100))).offset(max(0, offset))
 
 
 @router.get("/orders")
@@ -273,25 +316,25 @@ async def list_orders(
     status: OrderStatus | None = None,
     limit: int = 10,
     offset: int = 0,
+    seller_id: int | None = None,
     user: User = Depends(require_section("orders")),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(Order).options(
-        selectinload(Order.client),
-        selectinload(Order.courier),
-        selectinload(Order.items).selectinload(OrderItem.item),
-    ).order_by(Order.created_at.desc(), Order.id.desc())
-    if user.role == "COURIER":
-        query = query.where(Order.courier_id == user.id)
-    if status is not None:
-        query = query.where(Order.status == status)
-    result = await session.execute(query.limit(max(1, min(limit, 100))).offset(max(0, offset)))
+    try:
+        query = build_order_query(status=status, seller_id=seller_id, user=user, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    result = await session.execute(query)
     return [
         {
             "id": order.id,
             "invoice_number": order.invoice_number,
             "client_name": order.client.name if order.client else "",
-            "referred_by": order.referred_by,
+            "referred_by": (
+                order.referrer.full_name or order.referrer.username
+                if order.referrer else order.referred_by
+            ),
+            "referred_by_user_id": order.referred_by_user_id,
             "courier_name": (
                 order.courier.full_name or order.courier.username
                 if order.courier else ""
@@ -326,18 +369,24 @@ async def update(
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    permissions = user_permissions(user)
+    if user.role != "ADMIN" and order.status != OrderStatus.DELIVERED and "orders_edit" not in permissions:
+        raise HTTPException(status_code=403, detail="Нет отдельного права изменять заявки")
     if order.status == OrderStatus.DELIVERED:
-        if "orders_edit_delivered" not in user_permissions(user):
+        if "orders_edit_delivered" not in permissions:
             raise HTTPException(status_code=403, detail="Нет права изменять доставленную заявку")
         try:
             await reverse_delivered_order(session, order)
         except ValueError as exc:
             await session.rollback()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_edit" not in user_permissions(user):
-        raise HTTPException(status_code=403, detail="Нет права изменять принятую заявку")
+    elif order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED}:
+        raise HTTPException(status_code=403, detail="Изменять можно только заявку до одобрения или до передачи в путь")
     try:
-        order = await update_order(session, order_id, data.client_id, [item.model_dump() for item in data.items], data.referred_by)
+        order = await update_order(
+            session, order_id, data.client_id, [item.model_dump() for item in data.items],
+            data.referred_by, data.referred_by_user_id,
+        )
         await session.commit()
     except ValueError as exc:
         await session.rollback()
@@ -350,16 +399,20 @@ async def remove(order_id: int, user: User = Depends(require_section("orders")),
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    permissions = user_permissions(user)
     if order.status == OrderStatus.DELIVERED:
-        if "orders_edit_delivered" not in user_permissions(user):
+        if "orders_edit_delivered" not in permissions:
             raise HTTPException(status_code=403, detail="Нет права удалять доставленную заявку")
         try:
             await reverse_delivered_order(session, order)
         except ValueError as exc:
             await session.rollback()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED} and "orders_delete" not in user_permissions(user):
-        raise HTTPException(status_code=403, detail="Нет права удалять эту заявку")
+    else:
+        if order.status not in {OrderStatus.PENDING, OrderStatus.REJECTED, OrderStatus.IN_TRANSIT}:
+            raise HTTPException(status_code=403, detail="Удалять можно только заявку в статусах: ожидание, отклонена или в пути")
+        if user.role != "ADMIN" and "orders_delete" not in permissions:
+            raise HTTPException(status_code=403, detail="Нет отдельного права удалять заявки")
     try:
         await delete_order(session, order_id)
         await session.commit()

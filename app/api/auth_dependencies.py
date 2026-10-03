@@ -14,7 +14,7 @@ from app.models.schema import User
 from app.services.auth import decode_token
 
 SECTION_DEFAULT_ROLES = {
-    "dashboard": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"}, "orders": {"ADMIN", "COURIER"},
+    "dashboard": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"}, "orders": {"ADMIN"},
     "clients": {"ADMIN", "COURIER"}, "warehouse": {"ADMIN", "TECHNOLOGIST", "AGENT"},
     "sales": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"}, "production": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"},
     "shipments": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"}, "finance": {"ADMIN", "TECHNOLOGIST", "AGENT", "WORKER"},
