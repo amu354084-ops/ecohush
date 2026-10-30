@@ -1754,6 +1754,7 @@
           <label>Период от <input id="dashboard-date-from" type="date"></label>
           <label>до <input id="dashboard-date-to" type="date"></label>
           <button id="dashboard-period-apply" type="button">Применить</button>
+          <button id="dashboard-period-current-month" type="button">Текущий месяц</button>
           <button id="dashboard-period-reset" type="button">Весь период</button>
         </div>
 
@@ -1791,6 +1792,25 @@
             <div class="metric-value" id="metric-cash-balance">0</div>
             <div class="metric-meta">Приходы минус расходы</div>
           </div>
+        </div>
+
+        <div class="card dashboard-card" id="monthly-sales-panel">
+          <div class="panel-head compact">
+            <div class="panel-title">Продажи за текущий месяц</div>
+            <span class="tag neutral">С начала месяца по сегодня</span>
+          </div>
+          <div class="metrics-grid secondary-metrics">
+            <div class="metric-card green">
+              <div class="metric-label">Сумма продаж</div>
+              <div class="metric-value" id="monthly-sales-total">0.00</div>
+            </div>
+            <div class="metric-card blue">
+              <div class="metric-label">Продано товара</div>
+              <div class="metric-value" id="monthly-products-total">0.00</div>
+            </div>
+          </div>
+          <div id="monthly-sales-chart" class="seller-sales-bars" aria-label="Продажи по дням текущего месяца"></div>
+          <table class="table" id="monthly-products-table"></table>
         </div>
 
         <div class="card dashboard-card expense-breakdown-card">
@@ -2023,6 +2043,8 @@
             <summary>Показать партии</summary>
             <div class="card" style="margin-top:10px; padding: 14px;">
               <table class="table" id="batches-table"></table>
+              <h4>История изменений партий</h4>
+              <table class="table" id="batch-audit-table"></table>
               <div style="display:flex; gap:10px; align-items:center; margin-top:12px;">
                 <button id="batches-prev" class="button-second" type="button">Назад</button>
                 <span id="batches-page-label">Страница 1</span>
@@ -2262,7 +2284,23 @@
                 <option value="">Все продавцы</option>
               </select>
             </div>
+            <div class="form-grid order-list-filters">
+              <div class="field"><label for="orders-search">Поиск по имени клиента</label><input id="orders-search"
+                  placeholder="Имя магазина" /></div>
+              <div class="field"><label for="orders-date-from">Создано с</label><input id="orders-date-from"
+                  type="date" /></div>
+              <div class="field"><label for="orders-date-to">Создано по</label><input id="orders-date-to" type="date" />
+              </div>
+              <div class="field"><label for="orders-sort">Порядок</label><select id="orders-sort">
+                  <option value="newest">Сначала новые</option>
+                  <option value="oldest">Сначала старые</option>
+                  <option value="customer_total">По сумме покупок клиента</option>
+                </select></div>
+            </div>
+            <div class="order-actions"><button id="print-selected-invoices" class="button-second" type="button">Печать
+                выбранных накладных</button></div>
             <div class="order-tabs" id="order-tabs"></div>
+            <div class="subpanel" id="orders-product-summary" hidden></div>
             <div class="order-list" id="orders-list"></div>
             <div id="orders-pagination" style="display:flex; gap:10px; align-items:center; margin-top:12px;">
               <button id="orders-prev" class="button-second" type="button">Назад</button>
@@ -2294,6 +2332,8 @@
             <button id="add-manual-debt" type="button">Добавить долг</button>
             <div class="status-box" id="manual-debt-status">Эти записи не оформляются как продажа или погашение.</div>
             <table class="table" id="manual-debts-table"></table>
+            <h4>История изменений долгов</h4>
+            <table class="table" id="debt-audit-table"></table>
           </div>
           <div class="status-box" id="debts-summary">Загрузка итогов...</div>
           <table class="table" id="debts-table"></table>
@@ -2833,7 +2873,7 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=20260830-1"></script>
+  <script src="/static/app.js?v=20261030-1"></script>
   <script>
     const settingsSearch = document.getElementById('settings-search');
     const settingsButtons = Array.from(document.querySelectorAll('.settings-menu-btn'));

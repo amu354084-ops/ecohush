@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import async_session
-from app.models.schema import BOMHeader, BOMItem, Batch, Item, ItemType, OrderItem, SaleItem, ShipmentItem, User, Warehouse
+from app.models.schema import AuditEvent, BOMHeader, BOMItem, Batch, Item, ItemType, OrderItem, SaleItem, SaleItemBatchAllocation, ShipmentItem, StockTransaction, User, Warehouse
 from pydantic import Field
 from decimal import Decimal
 from app.services.inventory import create_batch
@@ -29,6 +29,11 @@ class CreateBatchRequest(BaseModel):
 class UpdateBatchPricesRequest(BaseModel):
     purchase_cost: Decimal | None = Field(default=None, gt=0)
     sale_price: Decimal | None = Field(default=None, ge=0)
+    reason: str = Field(default="Изменение цены партии", max_length=500)
+
+
+class DeleteBatchRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class WarehouseResponse(BaseModel):
@@ -145,6 +150,8 @@ async def read_items(_: User = Depends(require_section("warehouse")), session: A
             key=lambda batch: (batch.created_at, batch.id),
             default=None,
         )
+    def latest_batch(item: Item) -> Batch | None:
+        return max(item.batches, key=lambda batch: (batch.created_at, batch.id), default=None)
     return [
         ItemResponse(
             id=i.id,
@@ -155,8 +162,8 @@ async def read_items(_: User = Depends(require_section("warehouse")), session: A
             unit=i.unit,
             min_stock=i.min_stock,
             price=str(batch.sale_price if (batch := active_batch(i)) and batch.sale_price > 0 else i.price),
-            purchase_cost=str(batch.purchase_cost if batch else 0),
-            sale_price=str(batch.sale_price if batch and batch.sale_price > 0 else i.price),
+            purchase_cost=str(latest_batch(i).purchase_cost if latest_batch(i) else 0),
+            sale_price=str(latest_batch(i).sale_price if latest_batch(i) and latest_batch(i).sale_price > 0 else i.price),
         )
         for i in items
     ]
@@ -296,10 +303,16 @@ async def update_batch_prices(
     batch = await session.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="Партия не найдена")
+    before_data = f'{{"purchase_cost":"{batch.purchase_cost}","sale_price":"{batch.sale_price}"}}'
     if request.purchase_cost is not None:
         batch.purchase_cost = request.purchase_cost
     if request.sale_price is not None:
         batch.sale_price = request.sale_price
+    session.add(AuditEvent(
+        entity_type="batch", entity_id=batch.id, actor_id=getattr(user, "id", None), action="UPDATED",
+        reason=request.reason.strip() or "Изменение цены партии", before_data=before_data,
+        after_data=f'{{"purchase_cost":"{batch.purchase_cost}","sale_price":"{batch.sale_price}"}}',
+    ))
     await session.commit()
     await session.refresh(batch)
     return BatchResponse(
@@ -312,6 +325,43 @@ async def update_batch_prices(
         remaining_qty=str(batch.remaining_qty),
         created_at=batch.created_at.isoformat(),
     )
+
+
+@router.delete("/batches/{batch_id}")
+async def delete_batch(
+    batch_id: int,
+    request: DeleteBatchRequest,
+    user: User = Depends(current_user),
+    session: AsyncSession = session_dependency,
+) -> dict[str, int | bool]:
+    if user.role != "ADMIN" and "batches_edit" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права изменять партии")
+    batch = await session.get(Batch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Партия не найдена")
+    if batch.remaining_qty != batch.initial_qty:
+        raise HTTPException(status_code=409, detail="Нельзя удалить партию с изменённым остатком")
+    references = (
+        (StockTransaction, StockTransaction.batch_id),
+        (SaleItem, SaleItem.batch_id),
+        (SaleItemBatchAllocation, SaleItemBatchAllocation.batch_id),
+        (ShipmentItem, ShipmentItem.batch_id),
+    )
+    for model, column in references:
+        if await session.scalar(select(model.id).where(column == batch_id).limit(1)) is not None:
+            raise HTTPException(status_code=409, detail="Нельзя удалить партию, участвовавшую в складских операциях")
+    snapshot = (
+        f'{{"item_id":{batch.item_id},"warehouse_id":{batch.warehouse_id},'
+        f'"purchase_cost":"{batch.purchase_cost}","sale_price":"{batch.sale_price}",'
+        f'"initial_qty":"{batch.initial_qty}","remaining_qty":"{batch.remaining_qty}"}}'
+    )
+    session.add(AuditEvent(
+        entity_type="batch", entity_id=batch.id, actor_id=user.id, action="DELETED",
+        reason=request.reason.strip(), before_data=snapshot,
+    ))
+    await session.delete(batch)
+    await session.commit()
+    return {"id": batch_id, "deleted": True}
 
 
 @router.get("/boms", response_model=list[BOMResponse])
@@ -343,6 +393,7 @@ async def read_boms(session: AsyncSession = session_dependency) -> list[BOMRespo
 async def create_batch_endpoint(
     request: CreateBatchRequest,
     session: AsyncSession = session_dependency,
+    user: User = Depends(current_user),
 ) -> BatchResponse:
     item = await session.get(Item, request.item_id)
     if item is None:
@@ -350,7 +401,9 @@ async def create_batch_endpoint(
     latest_batch = await session.scalar(
         select(Batch).where(Batch.item_id == request.item_id).order_by(Batch.created_at.desc(), Batch.id.desc())
     )
-    purchase_cost = request.purchase_cost if request.purchase_cost and request.purchase_cost > 0 else (latest_batch.purchase_cost if latest_batch else None)
+    purchase_cost = request.purchase_cost if request.purchase_cost and request.purchase_cost > 0 else (
+        latest_batch.purchase_cost if latest_batch else None
+    )
     sale_price = request.sale_price if request.sale_price and request.sale_price > 0 else (
         latest_batch.sale_price if latest_batch and latest_batch.sale_price > 0 else item.price
     )
@@ -364,6 +417,15 @@ async def create_batch_endpoint(
         qty=request.qty,
         sale_price=sale_price,
     )
+    session.add(AuditEvent(
+        entity_type="batch", entity_id=batch.id, actor_id=getattr(user, "id", None), action="CREATED",
+        reason="Создание партии",
+        after_data=(
+            f'{{"item_id":{batch.item_id},"warehouse_id":{batch.warehouse_id},'
+            f'"purchase_cost":"{batch.purchase_cost}","sale_price":"{batch.sale_price}",'
+            f'"initial_qty":"{batch.initial_qty}"}}'
+        ),
+    ))
     await session.commit()
     return BatchResponse(
         id=batch.id,

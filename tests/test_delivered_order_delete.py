@@ -40,7 +40,7 @@ async def test_deleting_delivered_order_returns_stock_and_refunds_cash():
         warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
         session.add_all([admin, courier, client, item, warehouse])
         await session.flush()
-        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+        original_batch = await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
         order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 1}])
         await accept_order(session, order.id)
         await transition_order(session, order.id, OrderStatus.IN_TRANSIT, actor=courier)
@@ -73,6 +73,12 @@ async def test_deleting_delivered_order_returns_stock_and_refunds_cash():
             )
         )
         assert returned_stock == Decimal("2.0000")
+        returned_batch = await session.scalar(
+            select(Batch).where(Batch.item_id == item.id, Batch.id != original_batch.id)
+        )
+        assert returned_batch is not None
+        assert returned_batch.purchase_cost == Decimal("2.0000")
+        assert returned_batch.sale_price == Decimal("10.0000")
         refund = await session.scalar(
             select(func.sum(CashTransaction.amount)).where(CashTransaction.type == CashTransactionType.EXPENSE)
         )

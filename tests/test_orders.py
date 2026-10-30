@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.orders_api import list_orders
+from app.api.orders_api import debt_history, list_orders, order_product_totals
 from app.models.schema import (
     Base,
     Counterparty,
@@ -16,6 +16,7 @@ from app.models.schema import (
     Order,
     OrderPaymentType,
     OrderStatus,
+    Sale,
     User,
     Warehouse,
     WarehouseType,
@@ -283,6 +284,38 @@ async def test_delivered_order_can_be_reversed_with_stock_and_debt_returned():
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_debt_history_recovers_legacy_delivered_order_without_sale_link():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        admin = User(username="legacy-debt-admin", password_hash="test", role="ADMIN")
+        courier = User(username="legacy-debt-courier", password_hash="test", role="COURIER", can_change_status=True)
+        client = Counterparty(name="Legacy debt client")
+        item = Item(code="LEGACY-DEBT", name="Legacy product", type=ItemType.FINAL, unit="pcs")
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([admin, courier, client, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
+        order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 1}])
+        await accept_order(session, order.id)
+        await transition_order(session, order.id, OrderStatus.IN_TRANSIT, actor=courier)
+        await transition_order(session, order.id, OrderStatus.DELIVERED, OrderPaymentType.CASH, courier)
+        sale_id = order.sale_id
+        order.sale_id = None
+        await session.flush()
+
+        debts = await debt_history(None, admin, session)
+
+        assert len(debts) == 1
+        assert debts[0]["order_id"] == order.id
+        assert debts[0]["sale_id"] == sale_id
+        assert debts[0]["debt_amount"] == "10.00"
+    await engine.dispose()
+
+
 def test_order_invoice_subtracts_item_and_order_discounts_from_total():
     item = SimpleNamespace(name="Product", unit="pcs")
     order = SimpleNamespace(
@@ -297,7 +330,11 @@ def test_order_invoice_subtracts_item_and_order_discounts_from_total():
     )
     html = invoice_html(order)
     assert "<th>200.00</th><th>15.00</th><th>185.00</th>" in html
+    assert "<td>2.00 pcs</td>" in html
     assert "на сумму 185.00 сомони" in html
+    assert "font:12px/1.35 Arial,sans-serif" in html
+    assert "h1{font-size:16px" in html
+    assert "page-break-inside:avoid;break-inside:avoid-page" in html
 
 
 @pytest.mark.asyncio
@@ -334,4 +371,53 @@ async def test_list_orders_can_filter_by_seller():
             await list_orders(status=None, limit=10, offset=0, seller_id=seller_b.id, user=agent, session=session)
         assert exc_info.value.status_code == 403
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_orders_filter_by_client_dates_sort_by_customer_spend_and_aggregate_products():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        admin = User(username="order-filter-admin", password_hash="test", role="ADMIN")
+        courier = User(username="order-filter-courier", password_hash="test", role="COURIER")
+        alpha = Counterparty(name="Alpha Market")
+        beta = Counterparty(name="Beta Market")
+        item = Item(code="ORDER-FILTER", name="Filter Product", type=ItemType.FINAL, unit="pcs", min_stock=0)
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([admin, courier, alpha, beta, item, warehouse])
+        await session.flush()
+        await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("20"), Decimal("10"))
+        alpha_order_one = await create_order(session, courier.id, alpha.id, [{"item_id": item.id, "quantity": 3}])
+        alpha_order_two = await create_order(session, courier.id, alpha.id, [{"item_id": item.id, "quantity": 2}])
+        beta_order = await create_order(session, courier.id, beta.id, [{"item_id": item.id, "quantity": 4}])
+        for order in (alpha_order_one, alpha_order_two, beta_order):
+            order.created_at = datetime(2026, 10, 12, 10, 0)
+        session.add_all([
+            Sale(counterparty_id=alpha.id, total_amount=Decimal("500"), paid_amount=Decimal("500"), debt_amount=Decimal("0")),
+            Sale(counterparty_id=beta.id, total_amount=Decimal("400"), paid_amount=Decimal("400"), debt_amount=Decimal("0")),
+        ])
+        await session.commit()
+
+        filtered = await list_orders(
+            status=OrderStatus.PENDING, limit=10, offset=0, seller_id=None,
+            q="Alpha", date_from=date(2026, 10, 12), date_to=date(2026, 10, 12),
+            sort="newest", user=admin, session=session,
+        )
+        assert {row["id"] for row in filtered} == {alpha_order_one.id, alpha_order_two.id}
+        totals = await order_product_totals(
+            status=OrderStatus.PENDING, seller_id=None, q="Alpha",
+            date_from=date(2026, 10, 12), date_to=date(2026, 10, 12),
+            user=admin, session=session,
+        )
+        assert totals == [{"item_id": item.id, "item_name": "Filter Product", "unit": "pcs", "quantity": "5.0000"}]
+
+        sorted_orders = await list_orders(
+            status=None, limit=10, offset=0, seller_id=None, sort="customer_total",
+            user=admin, session=session,
+        )
+        assert sorted_orders[0]["client_name"] == "Alpha Market"
+        assert beta_order.id in {row["id"] for row in sorted_orders}
     await engine.dispose()

@@ -48,7 +48,30 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           script: |
+            set -eu
             cd /opt/erp_local
+            compose() {
+              docker compose --env-file .env.production -f docker-compose.prod.yml "$@"
+            }
+            compose exec -T web python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/ready', timeout=5)"
             git pull --ff-only origin main
-            docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-            docker compose --env-file .env.production -f docker-compose.prod.yml ps
+            compose up -d db
+            compose build web
+            backup_file=$(compose run --rm --no-deps web sh /app/scripts/backup_postgres.sh)
+            case "$backup_file" in
+              /var/backups/erp/postgres_*.sql.gz) ;;
+              *) echo "PostgreSQL backup did not return a valid backup path" >&2; exit 1 ;;
+            esac
+            compose run --rm --no-deps web test -s "$backup_file"
+            compose run --rm --no-deps web alembic upgrade head
+            compose up -d web
+            compose ps
+            ready=0
+            for attempt in $(seq 1 30); do
+              if compose exec -T web python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/ready', timeout=3)"; then
+                ready=1
+                break
+              fi
+              sleep 2
+            done
+            test "$ready" -eq 1

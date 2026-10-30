@@ -16,6 +16,7 @@ from app.models.schema import (
     OverheadExpense,
     PaymentMethod,
     Sale,
+    SaleItem,
     StockTransactionType,
     WarehouseType,
     ProductionMaterialUsage,
@@ -192,7 +193,8 @@ async def process_return(
 
     sale = await session.scalar(
         select(Sale).where(Sale.id == sale_id).options(
-            selectinload(Sale.sale_items), selectinload(Sale.counterparty)
+            selectinload(Sale.sale_items).selectinload(SaleItem.allocations),
+            selectinload(Sale.counterparty),
         )
     )
     if sale is None:
@@ -220,20 +222,35 @@ async def process_return(
                 comment=comment,
             )
         else:
-            return_batch = await create_batch(
-                session=session,
-                item_id=sale_item.item_id,
-                warehouse_id=WarehouseType.FINISHED,
-                purchase_cost=sale_item.cost_price,
-                qty=sale_item.qty,
-            )
-            await create_stock_transaction(
-                session=session,
-                batch_id=return_batch.id,
-                txn_type=StockTransactionType.RETURN,
-                qty=sale_item.qty,
-                comment=comment,
-            )
+            allocations = sale_item.allocations
+            allocated_qty = sum((allocation.qty for allocation in allocations), Decimal(0))
+            if not allocations or allocated_qty != sale_item.qty:
+                return_batches = [(sale_item.qty, sale_item.cost_price, sale_item.unit_price)]
+            else:
+                return_batches = [
+                    (
+                        allocation.qty,
+                        allocation.unit_cost,
+                        allocation.unit_price if allocation.unit_price is not None else sale_item.unit_price,
+                    )
+                    for allocation in allocations
+                ]
+            for qty, unit_cost, unit_price in return_batches:
+                return_batch = await create_batch(
+                    session=session,
+                    item_id=sale_item.item_id,
+                    warehouse_id=WarehouseType.FINISHED,
+                    purchase_cost=unit_cost,
+                    qty=qty,
+                    sale_price=unit_price,
+                )
+                await create_stock_transaction(
+                    session=session,
+                    batch_id=return_batch.id,
+                    txn_type=StockTransactionType.RETURN,
+                    qty=qty,
+                    comment=comment,
+                )
 
     sale.total_amount = Decimal(0)
     sale.paid_amount = max(Decimal(0), sale.paid_amount - cash_refund)

@@ -111,6 +111,7 @@ async def checkout_sale(
                 batch_id=move["batch_id"],
                 qty=move["qty"],
                 unit_cost=move["unit_cost"],
+                unit_price=move["unit_price"],
             ))
 
     if paid_amount > 0:

@@ -1,11 +1,13 @@
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.schema import Base, Batch, Item, ItemType, PaymentMethod, Warehouse, WarehouseType
-from app.api.inventory_api import CreateItemRequest, UpdateBatchPricesRequest, create_item, update_batch_prices
+from app.models.schema import AuditEvent, Base, Batch, Item, ItemType, PaymentMethod, StockTransaction, StockTransactionType, User, Warehouse, WarehouseType
+from app.api.inventory_api import CreateItemRequest, DeleteBatchRequest, UpdateBatchPricesRequest, create_item, delete_batch, update_batch_prices
 from app.services.sales import checkout_sale
 from app.services.warehouse_ops import add_stock, move_stock
 
@@ -179,4 +181,39 @@ async def test_move_uses_manual_or_item_price_for_destination_batch():
         assert result["destination_batch_id"] > 0
         batch = await session.get(Batch, result["destination_batch_id"])
         assert batch.purchase_cost == Decimal("13.0000")
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_batch_deletion_requires_unused_batch_and_keeps_audit_record():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        admin = User(username="batch-audit-admin", password_hash="test", role="ADMIN")
+        item = Item(code="BATCH-AUDIT", name="Batch audit", type=ItemType.FINAL, unit="pcs")
+        warehouse = Warehouse(id=WarehouseType.FINISHED, name="Finished", description="test")
+        session.add_all([admin, item, warehouse])
+        await session.flush()
+        unused = Batch(item_id=item.id, warehouse_id=warehouse.id, purchase_cost=Decimal("4"),
+                       sale_price=Decimal("8"), initial_qty=Decimal("2"), remaining_qty=Decimal("2"))
+        session.add(unused)
+        await session.flush()
+        await delete_batch(unused.id, DeleteBatchRequest(reason="Duplicate lot"), admin, session)
+        assert await session.get(Batch, unused.id) is None
+        audit = await session.scalar(select(AuditEvent).where(AuditEvent.entity_id == unused.id))
+        assert audit.action == "DELETED"
+        assert audit.reason == "Duplicate lot"
+
+        used = Batch(item_id=item.id, warehouse_id=warehouse.id, purchase_cost=Decimal("4"),
+                     sale_price=Decimal("8"), initial_qty=Decimal("2"), remaining_qty=Decimal("2"))
+        session.add(used)
+        await session.flush()
+        session.add(StockTransaction(batch_id=used.id, type=StockTransactionType.INBOUND, qty=Decimal("2")))
+        await session.commit()
+        with pytest.raises(HTTPException) as error:
+            await delete_batch(used.id, DeleteBatchRequest(reason="Remove used batch"), admin, session)
+        assert error.value.status_code == 409
+        assert await session.get(Batch, used.id) is not None
     await engine.dispose()

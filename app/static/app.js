@@ -13,6 +13,9 @@ const state = {
 const CLIENTS_PAGE_SIZE = 100;
 const WAREHOUSE_PAGE_SIZE = 10;
 const SHIPMENTS_PAGE_SIZE = 10;
+const DASHBOARD_PERIOD_MODE_KEY = 'dashboard_period_mode';
+const DASHBOARD_DATE_FROM_KEY = 'dashboard_date_from';
+const DASHBOARD_DATE_TO_KEY = 'dashboard_date_to';
 window.saleItems = [];
 
 function escapeHtml(value) {
@@ -38,6 +41,7 @@ const displayLabels = {
   SCRAP_DISPOSAL: 'Списание брака',
   RETURN: 'Возврат',
   CREATED: 'Создана',
+  WRITTEN_OFF: 'Долг списан',
   IN_TRANSIT: 'В пути',
   DELIVERED: 'Доставлена',
   CANCELLED: 'Отменена',
@@ -58,12 +62,50 @@ function displayValue(value) {
   if (['BANK', 'CARD', 'BANK_TRANSFER'].includes(mapped.toUpperCase())) {
     return 'Наличные';
   }
+  if (!displayLabels[mapped] && !displayLabels[mapped.toUpperCase()] && /^-?\d+\.\d+$/.test(mapped)) {
+    return Number(mapped).toFixed(2);
+  }
   return displayLabels[mapped] || displayLabels[mapped.toUpperCase()] || String(value);
+}
+
+function formatQuantity(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2) : String(value ?? '');
 }
 
 function bindIfExists(id, handler) {
   const el = document.getElementById(id);
   if (el) el.addEventListener('click', handler);
+}
+
+function setDashboardCurrentMonth() {
+  const today = new Date();
+  const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const from = document.getElementById('dashboard-date-from');
+  const to = document.getElementById('dashboard-date-to');
+  if (from) from.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+  if (to) to.value = formatDate(today);
+}
+
+function saveDashboardDates() {
+  const from = document.getElementById('dashboard-date-from')?.value || '';
+  const to = document.getElementById('dashboard-date-to')?.value || '';
+  sessionStorage.setItem(DASHBOARD_DATE_FROM_KEY, from);
+  sessionStorage.setItem(DASHBOARD_DATE_TO_KEY, to);
+}
+
+function prepareDashboardPeriod() {
+  const mode = sessionStorage.getItem(DASHBOARD_PERIOD_MODE_KEY);
+  if (!mode) sessionStorage.setItem(DASHBOARD_PERIOD_MODE_KEY, 'month');
+  if (!mode || mode === 'month') {
+    setDashboardCurrentMonth();
+    saveDashboardDates();
+  } else if (mode === 'custom') {
+    const from = document.getElementById('dashboard-date-from');
+    const to = document.getElementById('dashboard-date-to');
+    if (from) from.value = sessionStorage.getItem(DASHBOARD_DATE_FROM_KEY) || '';
+    if (to) to.value = sessionStorage.getItem(DASHBOARD_DATE_TO_KEY) || '';
+  }
 }
 
 function showView(view) {
@@ -86,18 +128,34 @@ function showView(view) {
   if (view === 'shipments') loadRecipientsForShipments();
   if (view === 'clients') loadClients();
   if (view === 'warehouse' || view === 'production' || view === 'shipments') loadWarehouseFormSelectors();
+  if (view === 'warehouse' && sessionStorage.getItem('erp_role') === 'ADMIN') loadAuditEvents('batch', 'batch-audit-table');
   if (view === 'production') loadProductionData();
   if (view === 'shipments') loadShipments();
   if (view === 'sales') {
     loadCounterpartiesForSales(); loadSaleProducts(); loadClients();
   }
-  if (view === 'dashboard') { loadDashboard(); loadSellerPerformanceOptions(); }
+  if (view === 'dashboard') { prepareDashboardPeriod(); loadDashboard(); loadSellerPerformanceOptions(); }
   if (view === 'orders') { loadOrderForm(); loadOrderSellerFilter().then(() => loadOrders()); }
   if (view === 'users') loadUsers();
   if (view === 'debts') {
     loadDebts(document.getElementById('debt-search')?.value || '');
+    if (sessionStorage.getItem('erp_role') === 'ADMIN') loadAuditEvents('manual_debt,sale_debt,counterparty', 'debt-audit-table');
     if (sessionStorage.getItem('erp_role') === 'ADMIN') loadManualDebtClients();
   }
+}
+
+async function loadAuditEvents(entityType, tableId) {
+  const data = await orderRequest(`/api/v1/clients/audit?entity_type=${encodeURIComponent(entityType)}`);
+  renderTable(tableId, [
+    { key: 'created_at', label: 'Дата' },
+    { key: 'action', label: 'Действие' },
+    { key: 'client_name', label: 'Клиент' },
+    { key: 'entity_id', label: 'ID записи' },
+    { key: 'actor_name', label: 'Кто изменил' },
+    { key: 'reason', label: 'Комментарий / причина' },
+    { key: 'before_data', label: 'До' },
+    { key: 'after_data', label: 'После' },
+  ], data?.detail ? [] : (Array.isArray(data) ? data : []), data?.detail || 'История изменений пока пуста.');
 }
 
 async function loadProductionData() {
@@ -522,11 +580,27 @@ async function loadOrders(status = state.orderStatus) {
   if (status !== state.orderStatus) state.ordersPage = 0;
   state.orderStatus = status;
   const sellerFilter = document.getElementById('order-seller-filter');
-  const sellerId = sellerFilter?.value ? `&seller_id=${encodeURIComponent(sellerFilter.value)}` : '';
-  const orderQuery = `limit=10&offset=${state.ordersPage * 10}${sellerId}`;
-  const data = status === 'ACTIVE'
-    ? (await Promise.all([orderRequest(`/api/v1/orders?status=ACCEPTED&${orderQuery}`), orderRequest(`/api/v1/orders?status=IN_TRANSIT&${orderQuery}`)])).flat()
-    : await orderRequest(`/api/v1/orders?status=${encodeURIComponent(status)}&${orderQuery}`);
+  const filters = new URLSearchParams({
+    limit: '10',
+    offset: String(state.ordersPage * 10),
+    sort: document.getElementById('orders-sort')?.value || 'newest',
+  });
+  const search = document.getElementById('orders-search')?.value.trim();
+  const dateFrom = document.getElementById('orders-date-from')?.value;
+  const dateTo = document.getElementById('orders-date-to')?.value;
+  if (sellerFilter?.value) filters.set('seller_id', sellerFilter.value);
+  if (search) filters.set('q', search);
+  if (dateFrom) filters.set('date_from', dateFrom);
+  if (dateTo) filters.set('date_to', dateTo);
+  const orderQuery = filters.toString();
+  const statusQuery = new URLSearchParams();
+  if (status === 'ACTIVE') {
+    statusQuery.append('statuses', 'ACCEPTED');
+    statusQuery.append('statuses', 'IN_TRANSIT');
+  } else {
+    statusQuery.set('status', status);
+  }
+  const data = await orderRequest(`/api/v1/orders?${statusQuery.toString()}&${orderQuery}`);
   const tabs = document.getElementById('order-tabs');
   const list = document.getElementById('orders-list');
   if (!tabs || !list) return;
@@ -535,13 +609,29 @@ async function loadOrders(status = state.orderStatus) {
   tabs.innerHTML = statuses.map(([key, label]) => `<button type="button" class="order-tab ${key === status ? 'active' : ''}" data-order-status="${key}">${label}</button>`).join('');
   tabs.querySelectorAll('[data-order-status]').forEach((button) => button.addEventListener('click', () => loadOrders(button.dataset.orderStatus)));
   if (data?.detail) { list.innerHTML = `<div class="status-box error">${escapeHtml(data.detail)}</div>`; return; }
+  const totalsQuery = new URLSearchParams(filters);
+  totalsQuery.delete('limit');
+  totalsQuery.delete('offset');
+  const totalsResponses = [await orderRequest(`/api/v1/orders/product-totals?${statusQuery.toString()}&${totalsQuery.toString()}`)];
+  const totalMap = new Map();
+  totalsResponses.filter(Array.isArray).flat().forEach((entry) => {
+    const existing = totalMap.get(entry.item_id) || { ...entry, quantity: 0 };
+    existing.quantity += Number(entry.quantity || 0);
+    totalMap.set(entry.item_id, existing);
+  });
+  const productSummary = document.getElementById('orders-product-summary');
+  if (productSummary) {
+    const totals = [...totalMap.values()].sort((left, right) => left.item_name.localeCompare(right.item_name, 'ru'));
+    productSummary.hidden = false;
+    productSummary.innerHTML = `<strong>Товары по всем заявкам:</strong>${totals.length ? `<table class="table"><tr><th>Товар</th><th>Количество</th></tr>${totals.map((entry) => `<tr><td>${escapeHtml(entry.item_name)}</td><td>${escapeHtml(formatQuantity(entry.quantity))} ${escapeHtml(entry.unit)}</td></tr>`).join('')}</table>` : '<div>Нет позиций за выбранный период.</div>'}`;
+  }
   window.orderCache = Object.fromEntries((data || []).map((order) => [String(order.id), order]));
   list.innerHTML = (data || []).map((order) => {
     const items = (order.items || []).map((item) => {
       const lineSubtotal = Number(item.quantity || 0) * Number(item.price || 0);
       const discountPercent = lineSubtotal > 0 ? Number(item.discount || 0) / lineSubtotal * 100 : 0;
       const discountLabel = discountPercent > 0 ? `, скидка ${discountPercent.toFixed(2)}%` : '';
-      return `${escapeHtml(item.name)}: ${escapeHtml(item.quantity)} ${escapeHtml(item.unit || '')} x ${escapeHtml(item.price)}${discountLabel}`;
+      return `${escapeHtml(item.name)}: ${escapeHtml(formatQuantity(item.quantity))} ${escapeHtml(item.unit || '')} x ${escapeHtml(displayValue(item.price))}${discountLabel}`;
     }).join('<br>');
     const orderTotal = Math.max(0, (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0) - Number(item.discount || 0), 0) - Number(order.discount_amount || 0));
     const permissions = (() => { try { return JSON.parse(sessionStorage.getItem('erp_permissions') || '[]'); } catch { return []; } })();
@@ -549,6 +639,18 @@ async function loadOrders(status = state.orderStatus) {
     const canDelete = (['PENDING', 'REJECTED', 'IN_TRANSIT'].includes(order.status) && (role === 'ADMIN' || permissions.includes('orders_delete'))) || (order.status === 'DELIVERED' && (role === 'ADMIN' || permissions.includes('orders_edit_delivered')));
     return `<article class="order-row"><div class="order-row-head"><strong>Заявка №${escapeHtml(order.id)}</strong><span class="tag neutral">${escapeHtml(orderStatusLabel(order.status))}</span></div><div>Магазин: ${escapeHtml(order.client_name)}<br>Курьер: ${escapeHtml(order.courier_name || 'Не назначен')}<br>Кто дал клиента: ${escapeHtml(order.referred_by || 'не указан')}<br>Создан: ${escapeHtml(order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '')}</div><div style="margin-top:8px;"><strong>Заказано:</strong><br>${items || 'Нет позиций'}<br><strong>Сумма: ${formatMoney(orderTotal)}</strong></div>${order.invoice_number ? `<div style="margin-top:8px;">Накладная: ${escapeHtml(order.invoice_number)}</div>` : ''}${order.rejection_reason ? `<div class="status-box error">Причина: ${escapeHtml(order.rejection_reason)}</div>` : ''}<div class="order-actions">${canEdit ? `<button type="button" class="button-second edit-order" data-order-id="${escapeHtml(order.id)}">Изменить</button>` : ''}${canDelete ? `<button type="button" class="button-second delete-order" data-order-id="${escapeHtml(order.id)}">Удалить</button>` : ''}${['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status) ? `<button type="button" class="button-second invoice-order" data-order-id="${escapeHtml(order.id)}">Накладная</button>` : ''}${role === 'COURIER' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && (order.status === 'ACCEPTED' || order.status === 'IN_TRANSIT') ? `<button type="button" class="deliver-order" data-order-id="${escapeHtml(order.id)}" data-order-total="${orderTotal}">Доставить / Подтвердить вручение</button>` : ''}${role === 'ADMIN' && order.status === 'PENDING' ? `<button type="button" class="accept-order" data-order-id="${escapeHtml(order.id)}">Принять</button><button type="button" class="button-second reject-order" data-order-id="${escapeHtml(order.id)}">Отклонить</button>` : ''}${role === 'ADMIN' && order.status === 'ACCEPTED' ? `<button type="button" class="button-second transit-order" data-order-id="${escapeHtml(order.id)}">Передать в путь</button>` : ''}</div></article>`;
   }).join('') || '<div class="status-box">Заявок нет.</div>';
+  Array.from(list.querySelectorAll('.order-row')).forEach((row, index) => {
+    const order = data[index];
+    if (!order || !['ACCEPTED', 'IN_TRANSIT', 'DELIVERED'].includes(order.status)) return;
+    const label = document.createElement('label');
+    label.className = 'invoice-selection';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'select-order-invoice';
+    checkbox.value = order.id;
+    label.append(checkbox, document.createTextNode(` Выбрать накладную №${order.invoice_number || order.id}`));
+    row.prepend(label);
+  });
   list.querySelectorAll('.delete-order').forEach((button) => {
     if (window.orderCache?.[button.dataset.orderId]?.status === 'DELIVERED') {
       button.textContent = 'Возврат и удалить';
@@ -738,8 +840,13 @@ async function loadManualDebts(clientId) {
     deleteButton.className = 'button-second';
     deleteButton.textContent = 'Удалить';
     deleteButton.addEventListener('click', async () => {
-      if (!window.confirm(`Удалить запись долга ${formatMoney(entry.amount)}?`)) return;
-      const result = await orderRequest(`/api/v1/clients/manual-debts/${entry.id}`, { method: 'DELETE' });
+      const reason = prompt(`Причина удаления долга ${formatMoney(entry.amount)}:`);
+      if (reason === null || !reason.trim()) return;
+      if (!window.confirm(`Удалить запись долга ${formatMoney(entry.amount)}? Причина сохранится в истории.`)) return;
+      const result = await orderRequest(`/api/v1/clients/manual-debts/${entry.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
       if (result.detail) { showToast(result.detail); return; }
       await loadManualDebts(clientId);
       await loadDebts(document.getElementById('debt-search')?.value || '');
@@ -761,6 +868,7 @@ async function loadDebtDetails(query) {
     { key: 'invoice_number', label: 'Накладная' },
     { key: 'delivered_at', label: 'Дата и время' },
     { key: 'total', label: 'Сумма' },
+    { key: 'debt_amount', label: 'Остаток долга' },
     { key: 'items', label: 'Товары' },
     { key: 'actions', label: 'Действия' },
   ], orders.map((order) => ({
@@ -773,6 +881,25 @@ async function loadDebtDetails(query) {
     const order = orders[index - 1];
     const cell = row.cells[row.cells.length - 1];
     if (!cell || !order) return;
+    const writeOffButton = document.createElement('button');
+    writeOffButton.type = 'button';
+    writeOffButton.className = 'button-second';
+    writeOffButton.textContent = 'Списать долг';
+    writeOffButton.addEventListener('click', async () => {
+      const reason = prompt(`Причина списания долга ${formatMoney(order.debt_amount)}:`);
+      if (reason === null || !reason.trim()) return;
+      if (!window.confirm(`Списать долг ${formatMoney(order.debt_amount)} по продаже №${order.sale_id}? Заказ и история сохранятся.`)) return;
+      const result = await orderRequest(`/api/v1/clients/sale-debts/${order.sale_id}/write-off`, {
+        method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (result.detail) { showToast(result.detail); return; }
+      await Promise.all([
+        loadDebts(document.getElementById('debt-search')?.value || ''),
+        loadDebtDetails(query),
+        loadAuditEvents('manual_debt,sale_debt,counterparty', 'debt-audit-table'),
+      ]);
+      showToast(`Долг ${formatMoney(result.amount)} списан и записан в историю.`);
+    });
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'button-second';
@@ -787,7 +914,7 @@ async function loadDebtDetails(query) {
       }
       if (preview) preview.document.write(await response.text());
     });
-    cell.appendChild(button);
+    cell.append(writeOffButton, button);
   });
 }
 
@@ -839,7 +966,7 @@ async function refreshPendingNotification() {
 function formatMoney(value) {
   const amount = typeof value === 'string' ? Number(value) : value;
   if (typeof amount === 'number' || typeof amount === 'bigint') {
-    return `${Number(amount).toLocaleString('ru-RU')} сом`;
+    return `${Number(amount).toFixed(2)} сом`;
   }
   return value;
 }
@@ -856,7 +983,8 @@ function renderClientList(clients) {
     return;
   }
   const header = document.createElement('tr');
-  ['ID', 'Имя', 'Телефон', 'Задолженность'].forEach((label) => {
+  const showArchiveAction = sessionStorage.getItem('erp_role') === 'ADMIN';
+  ['ID', 'Имя', 'Телефон', 'Задолженность', ...(showArchiveAction ? ['Действия'] : [])].forEach((label) => {
     const th = document.createElement('th');
     th.textContent = label;
     header.appendChild(th);
@@ -871,6 +999,27 @@ function renderClientList(clients) {
       cell.textContent = value;
       row.appendChild(cell);
     });
+    if (showArchiveAction) {
+      const actionCell = document.createElement('td');
+      const archiveButton = document.createElement('button');
+      archiveButton.type = 'button';
+      archiveButton.className = 'button-second';
+      archiveButton.textContent = 'В архив';
+      archiveButton.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const reason = prompt(`Причина архивирования клиента «${client.name}»:`);
+        if (reason === null || !reason.trim()) return;
+        if (!window.confirm(`Переместить «${client.name}» в архив? Финансовая история сохранится.`)) return;
+        const result = await orderRequest(`/api/v1/clients/${client.id}/archive`, {
+          method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+        });
+        if (result.detail) { showToast(result.detail); return; }
+        await loadClients(document.getElementById('client-search')?.value || '', state.clientsPage);
+        await loadAuditEvents('manual_debt,counterparty', 'debt-audit-table');
+      });
+      actionCell.appendChild(archiveButton);
+      row.appendChild(actionCell);
+    }
     row.addEventListener('click', () => {
       window.editingClientId = client.id;
       document.getElementById('client-name').value = client.name || '';
@@ -902,7 +1051,7 @@ async function loadClientHistory(clientId) {
   const title = document.getElementById('client-history-title');
   if (title) title.textContent = `История клиента: ${client.name}`;
   if (summary) {
-    summary.textContent = `Телефон: ${client.phone || 'не указан'} | Текущий долг: ${client.current_debt} | Продажи: ${data.sales_total} | Оплачено: ${data.paid_total}`;
+    summary.textContent = `Телефон: ${client.phone || 'не указан'} | Текущий долг: ${formatMoney(client.current_debt)} | Продажи: ${formatMoney(data.sales_total)} | Оплачено: ${formatMoney(data.paid_total)}`;
   }
   renderTable('client-sales-history-table', [
     { key: 'id', label: 'Продажа' },
@@ -1351,6 +1500,7 @@ async function loadSellerPerformance() {
 }
 
 async function loadDashboard() {
+  if (sessionStorage.getItem(DASHBOARD_PERIOD_MODE_KEY) === 'month') setDashboardCurrentMonth();
   const statusNode = document.getElementById('dashboard-status');
   const updatedAtNode = document.getElementById('dashboard-updated-at');
   if (statusNode) {
@@ -1416,12 +1566,33 @@ async function loadDashboard() {
   if (summarySales) summarySales.textContent = data.sales_count ?? '0';
   if (summaryBatches) summaryBatches.textContent = data.production_count ?? '0';
   if (summaryLow) summaryLow.textContent = data.low_stock_items ?? '0';
+  const monthly = data.monthly_sales || {};
+  const monthSalesTotal = document.getElementById('monthly-sales-total');
+  const monthProductsTotal = document.getElementById('monthly-products-total');
+  if (monthSalesTotal) monthSalesTotal.textContent = formatMoney(monthly.total_amount || 0);
+  if (monthProductsTotal) monthProductsTotal.textContent = formatQuantity(monthly.product_quantity || 0);
+  renderTable('monthly-products-table', [
+    { key: 'item_name', label: 'Товар' },
+    { key: 'quantity', label: 'Количество' },
+    { key: 'unit', label: 'Ед.' },
+    { key: 'total_amount', label: 'Продано на сумму' },
+  ], monthly.products || [], 'В этом месяце продаж пока нет.');
+  const monthChart = document.getElementById('monthly-sales-chart');
+  if (monthChart) {
+    const daily = monthly.daily || [];
+    const maxAmount = Math.max(0, ...daily.map((entry) => Number(entry.total_amount || 0)));
+    monthChart.innerHTML = daily.length ? daily.map((entry) => {
+      const amount = Number(entry.total_amount || 0);
+      const width = maxAmount ? Math.max(1, amount / maxAmount * 100) : 0;
+      return `<div class="seller-sales-bar-row"><span class="seller-sales-bar-name">${escapeHtml(new Date(`${entry.day}T00:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }))}</span><span class="seller-sales-bar-track"><i style="width:${width.toFixed(1)}%"></i></span><strong>${escapeHtml(formatMoney(amount))}</strong></div>`;
+    }).join('') : '<div class="help-text">Нет продаж за текущий месяц.</div>';
+  }
   const lowStockItems = Array.isArray(data.low_stock_details) ? data.low_stock_details : [];
   if (lowStockAlert) lowStockAlert.hidden = lowStockItems.length === 0;
   if (lowStockTitle) lowStockTitle.textContent = `Внимание: низкий остаток (${lowStockItems.length})`;
   if (lowStockDetails) {
     lowStockDetails.textContent = lowStockItems
-      .map((item) => `${item.name} (${item.code}): ${item.remaining_qty} ${item.unit}, минимум ${item.min_stock}`)
+      .map((item) => `${item.name} (${item.code}): ${formatQuantity(item.remaining_qty)} ${item.unit}, минимум ${formatQuantity(item.min_stock)}`)
       .join('; ');
   }
   renderSalesChart(data.chart);
@@ -1499,15 +1670,33 @@ async function loadDashboard() {
 }
 
 bindIfExists('dashboard-period-apply', async () => {
+  const from = document.getElementById('dashboard-date-from')?.value;
+  const to = document.getElementById('dashboard-date-to')?.value;
+  sessionStorage.setItem(DASHBOARD_PERIOD_MODE_KEY, from || to ? 'custom' : 'all');
+  saveDashboardDates();
   await loadDashboard();
   await loadSellerPerformance();
 });
+bindIfExists('dashboard-period-current-month', () => {
+  sessionStorage.setItem(DASHBOARD_PERIOD_MODE_KEY, 'month');
+  setDashboardCurrentMonth();
+  saveDashboardDates();
+  return Promise.all([loadDashboard(), loadSellerPerformance()]);
+});
 bindIfExists('dashboard-period-reset', () => {
+  sessionStorage.setItem(DASHBOARD_PERIOD_MODE_KEY, 'all');
   const from = document.getElementById('dashboard-date-from');
   const to = document.getElementById('dashboard-date-to');
   if (from) from.value = '';
   if (to) to.value = '';
+  saveDashboardDates();
   return Promise.all([loadDashboard(), loadSellerPerformance()]);
+});
+['dashboard-date-from', 'dashboard-date-to'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('change', () => {
+    sessionStorage.setItem(DASHBOARD_PERIOD_MODE_KEY, 'custom');
+    saveDashboardDates();
+  });
 });
 
 function renderTable(tableId, columns, rows, emptyText = 'Данные отсутствуют.') {
@@ -1723,10 +1912,12 @@ function renderWarehouseTables() {
       const purchaseCost = prompt('Себестоимость партии:', batch.purchase_cost);
       const salePrice = prompt('Цена продажи партии:', batch.sale_price);
       if (purchaseCost === null || salePrice === null) return;
+      const reason = prompt('Комментарий к изменению цен:', 'Изменение цены партии');
+      if (reason === null || !reason.trim()) return;
       const result = await fetchJson(`/api/v1/inventory/batches/${batch.id}/prices`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ purchase_cost: Number(purchaseCost), sale_price: Number(salePrice) }),
+        body: JSON.stringify({ purchase_cost: Number(purchaseCost), sale_price: Number(salePrice), reason: reason.trim() }),
       });
       if (result?.detail) {
         setStatus('warehouse-response', `Ошибка изменения цен: ${result.detail}`, 'error');
@@ -1735,7 +1926,23 @@ function renderWarehouseTables() {
       await loadWarehouseTables();
       setStatus('warehouse-response', 'Цены партии обновлены.', 'success');
     });
-    cell.appendChild(button);
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'small-btn';
+    deleteButton.textContent = 'Удалить партию';
+    deleteButton.addEventListener('click', async () => {
+      const reason = prompt('Причина удаления партии:');
+      if (reason === null || !reason.trim()) return;
+      if (!window.confirm(`Удалить партию №${batch.id}? Запись будет добавлена в историю.`)) return;
+      const result = await fetchJson(`/api/v1/inventory/batches/${batch.id}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (result?.detail) { setStatus('warehouse-response', result.detail, 'error'); return; }
+      await loadWarehouseTables();
+      if (sessionStorage.getItem('erp_role') === 'ADMIN') await loadAuditEvents('batch', 'batch-audit-table');
+    });
+    cell.append(button, deleteButton);
   });
   const stockColumns = [
     { key: 'item_code', label: 'Код' },
@@ -1820,8 +2027,13 @@ function syncBatchCost() {
   const batch = (window.batches || [])
     .filter((entry) => entry.item_id === itemId)
     .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))[0];
-  costInput.value = batch ? Number(batch.purchase_cost || 0).toFixed(2) : '0';
-  salePriceInput.value = batch ? Number(batch.sale_price || 0).toFixed(2) : '0';
+  const item = window.inventoryItems?.find((entry) => entry.id === itemId);
+  const purchaseCost = Number(item?.purchase_cost || batch?.purchase_cost || 0);
+  const salePrice = Number(item?.sale_price || batch?.sale_price || item?.price || 0);
+  costInput.value = purchaseCost > 0 ? purchaseCost.toFixed(2) : '';
+  salePriceInput.value = salePrice.toFixed(2);
+  costInput.readOnly = purchaseCost > 0;
+  salePriceInput.readOnly = salePrice > 0;
 }
 
 function resetBatchForm() {
@@ -1880,7 +2092,7 @@ async function loadShipmentDetails(shipmentId) {
   document.getElementById('ship-shipment-id').value = data.id;
   const title = document.getElementById('shipment-details-title');
   if (title) title.textContent = `Отгрузка №${data.id}: ${data.recipient_name}`;
-  if (summary) summary.textContent = `Статус: ${data.status} | Дата: ${data.created_at || ''} | Сумма: ${data.total_amount} | Примечание: ${data.note || 'нет'}`;
+  if (summary) summary.textContent = `Статус: ${data.status} | Дата: ${data.created_at || ''} | Сумма: ${formatMoney(data.total_amount)} | Примечание: ${data.note || 'нет'}`;
   renderTable('shipment-details-items-table', [
     { key: 'code', label: 'Код' },
     { key: 'name', label: 'Товар' },
@@ -2087,6 +2299,35 @@ document.addEventListener('DOMContentLoaded', () => {
   bindIfExists('add-order-line', addOrderLine);
   bindIfExists('logout-button', logout);
   bindIfExists('refresh-orders', () => loadOrders());
+  let ordersSearchTimer;
+  ['orders-search', 'orders-date-from', 'orders-date-to', 'orders-sort'].forEach((id) => {
+    const input = document.getElementById(id);
+    input?.addEventListener(id === 'orders-search' ? 'input' : 'change', () => {
+      clearTimeout(ordersSearchTimer);
+      ordersSearchTimer = setTimeout(() => { state.ordersPage = 0; loadOrders(); }, id === 'orders-search' ? 250 : 0);
+    });
+  });
+  bindIfExists('print-selected-invoices', async () => {
+    const ids = Array.from(document.querySelectorAll('.select-order-invoice:checked')).map((input) => input.value);
+    if (!ids.length) { showToast('Выберите хотя бы одну накладную.'); return; }
+    const preview = window.open('', '_blank');
+    if (!preview) { showToast('Разрешите всплывающее окно для печати.'); return; }
+    const documents = await Promise.all(ids.map(async (id) => {
+      const response = await authenticatedFetch(`/api/v1/orders/${encodeURIComponent(id)}/invoice`);
+      if (!response.ok) throw new Error((await safeJson(response)).detail || response.statusText);
+      return new DOMParser().parseFromString(await response.text(), 'text/html');
+    })).catch((error) => {
+      preview.close();
+      showToast(`Не удалось загрузить накладные: ${error.message}`);
+      return null;
+    });
+    if (!documents) return;
+    const style = documents[0].querySelector('style')?.textContent || '';
+    const invoices = documents.map((doc) => doc.querySelector('main.invoice')?.outerHTML || '').join('');
+    preview.document.open();
+    preview.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><style>${style}</style></head><body>${invoices}</body></html>`);
+    preview.document.close();
+  });
   bindIfExists('orders-prev', () => { state.ordersPage = Math.max(0, state.ordersPage - 1); loadOrders(); });
   bindIfExists('orders-next', () => { state.ordersPage += 1; loadOrders(); });
   bindIfExists('create-order', async () => {

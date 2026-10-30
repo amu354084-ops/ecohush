@@ -253,6 +253,22 @@ class ManualDebt(Base):
     counterparty: Mapped[Counterparty] = relationship("Counterparty", back_populates="manual_debts")
 
 
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_entity_created", "entity_type", "entity_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparties.id"), nullable=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    before_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    after_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Sale(Base):
     __tablename__ = "sales"
     __table_args__ = (
@@ -302,6 +318,7 @@ class SaleItemBatchAllocation(Base):
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
 
     sale_item: Mapped[SaleItem] = relationship("SaleItem", back_populates="allocations")
     batch: Mapped[Batch] = relationship("Batch")

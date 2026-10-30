@@ -63,6 +63,14 @@ def amount_in_words(amount: Decimal, currency: str = "сомони") -> str:
     return f"{prefix}{words} {currency} {kopecks:02d} дирам"
 
 
+def _format_quantity(value: Decimal) -> str:
+    text = format(Decimal(value), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    whole, separator, fraction = text.partition(".")
+    return f"{whole}.{(fraction + '00')[:max(2, len(fraction))]}"
+
+
 def invoice_html(order, company_name: str = "ECO KHUSH") -> str:
     months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
     created = order.created_at
@@ -80,10 +88,10 @@ def invoice_html(order, company_name: str = "ECO KHUSH") -> str:
         line_total = line_subtotal - line_discount
         subtotal += line_subtotal
         discount_total += line_discount
-        rows.append(f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{line.quantity} {escape(line.item.unit)}</td><td>{line.price:.2f}</td><td>{line_subtotal:.2f}</td><td>{line_discount:.2f}</td><td>{line_total:.2f}</td></tr>")
+        rows.append(f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{_format_quantity(line.quantity)} {escape(line.item.unit)}</td><td>{line.price:.2f}</td><td>{line_subtotal:.2f}</td><td>{line_discount:.2f}</td><td>{line_total:.2f}</td></tr>")
     total = subtotal - discount_total
     return f"""<!doctype html><html lang='ru'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Заказ клиента №{escape(order.invoice_number or str(order.id))}</title><style>
-*{{box-sizing:border-box}}body{{margin:0;background:#eef1f4;color:#17212b;font:14px/1.45 Arial,sans-serif}}.invoice{{max-width:1000px;margin:24px auto;padding:34px;background:#fff;box-shadow:0 8px 25px #17212b1a}}.toolbar{{display:flex;justify-content:flex-end;margin-bottom:20px}}button{{border:0;border-radius:7px;background:#1769aa;color:white;padding:10px 16px;font-weight:700;cursor:pointer}}h1{{font-size:23px;margin:0 0 25px;border-bottom:2px solid #17212b;padding-bottom:12px}}.meta{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:22px}}.meta b{{display:inline-block;min-width:110px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #9ba7b2;padding:8px 7px;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}th{{background:#e9eef2;font-size:12px}}.totals{{margin:16px 0 8px;display:flex;justify-content:flex-end}}.totals table{{width:430px}}.words{{margin-top:10px}}.signatures{{display:flex;justify-content:space-between;margin-top:55px}}@media(max-width:700px){{.invoice{{margin:0;padding:18px;box-shadow:none}}.meta{{grid-template-columns:1fr}}table{{font-size:11px}}th,td{{padding:5px 3px}}.signatures{{gap:20px;font-size:12px}}}}@media print{{body{{background:#fff}}.invoice{{margin:0;max-width:none;padding:0;box-shadow:none}}.toolbar{{display:none}}@page{{size:A4;margin:14mm}}}}
+*{{box-sizing:border-box}}body{{margin:0;background:#eef1f4;color:#17212b;font:12px/1.35 Arial,sans-serif}}.invoice{{max-width:900px;margin:14px auto;padding:20px;background:#fff;box-shadow:0 8px 25px #17212b1a}}.toolbar{{display:flex;justify-content:flex-end;margin-bottom:10px}}button{{border:0;border-radius:7px;background:#1769aa;color:white;padding:8px 12px;font-weight:700;cursor:pointer}}h1{{font-size:16px;line-height:1.25;margin:0 0 12px;border-bottom:1px solid #17212b;padding-bottom:6px}}.meta{{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-bottom:12px;font-size:10px}}.meta b{{display:inline-block;min-width:90px}}table{{width:100%;border-collapse:collapse;font-size:10px}}th,td{{border:1px solid #9ba7b2;padding:4px 3px;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}th{{background:#e9eef2;font-size:9px}}.totals{{margin:8px 0 4px;display:flex;justify-content:flex-end}}.totals table{{width:360px}}.words{{margin-top:6px;font-size:10px}}.signatures{{display:flex;justify-content:space-between;margin-top:22px;font-size:10px}}@media(max-width:700px){{.invoice{{margin:0;padding:12px;box-shadow:none}}.meta{{grid-template-columns:1fr}}table{{font-size:9px}}th,td{{padding:3px 2px}}.signatures{{gap:12px;font-size:9px}}}}@media print{{body{{background:#fff;font-size:10px}}.invoice{{margin:0;max-width:none;padding:0;box-shadow:none;page-break-inside:avoid;break-inside:avoid-page}}h1{{font-size:14px;margin-bottom:8px}}.meta{{margin-bottom:8px}}.signatures{{margin-top:14px}}.toolbar{{display:none}}@page{{size:A4;margin:8mm}}}}
 </style></head><body><main class='invoice'><div class='toolbar'><button onclick='window.print()' aria-label='Печать'>🖨 Печать / Скачать PDF</button></div><h1>Заказ клиента №{escape(order.invoice_number or str(order.id))} от {date_text}</h1><div class='meta'><div><b>Исполнитель:</b> {escape(company_name)}</div><div><b>Заказчик:</b> {escape(order.client.name if order.client else "")}</div><div><b>Курьер:</b> {escape(order.courier.full_name if order.courier and order.courier.full_name else order.courier.username if order.courier else "")}</div><div><b>Статус:</b> {escape(str(order.status))}</div></div><table><thead><tr><th>№</th><th>Товары</th><th>Кол-во</th><th>Цена</th><th>Сумма без скидки</th><th>Скидка</th><th>Сумма</th></tr></thead><tbody>{''.join(rows)}</tbody><tfoot><tr><th colspan='4'>Итого:</th><th>{subtotal:.2f}</th><th>{discount_total:.2f}</th><th>{total:.2f}</th></tr></tfoot></table><p>Всего наименований {len(order.items)}, на сумму {total:.2f} сомони.</p><p class='words'><b>Сумма прописью:</b> {amount_in_words(total)}</p><div class='signatures'><span>Исполнитель __________________</span><span>Заказчик __________________</span></div></main></body></html>"""
 
 
@@ -99,7 +107,7 @@ def sale_invoice_html(sale, company_name: str = "ECO KHUSH") -> str:
         subtotal += line_subtotal
         discount_total += line_discount
         rows.append(
-            f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{line.qty} {escape(line.item.unit)}</td>"
+            f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{_format_quantity(line.qty)} {escape(line.item.unit)}</td>"
             f"<td>{line.unit_price:.2f}</td><td>{line_subtotal:.2f}</td><td>{line_discount:.2f}</td><td>{line_total:.2f}</td></tr>"
         )
     total = subtotal - discount_total

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date, datetime, time as datetime_time, timedelta
 from decimal import Decimal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +17,8 @@ from app.api.auth_dependencies import ALL_PERMISSIONS, SECTION_DEFAULT_ROLES, cu
 from app.models.schema import Counterparty, Item, ItemType, Order, OrderItem, OrderPaymentType, OrderStatus, Sale, User
 from app.services.auth import create_token, hash_password, verify_password
 from app.services.invoice import invoice_html
-from app.services.orders import accept_order, create_order, delete_order, reject_order, reverse_delivered_order, transition_order, update_order
+from app.services.timezone import get_app_timezone
+from app.services.orders import _recover_legacy_sale_id, accept_order, create_order, delete_order, reject_order, reverse_delivered_order, transition_order, update_order
 
 router = APIRouter()
 _login_failures: dict[str, list[float]] = {}
@@ -201,24 +204,39 @@ async def debt_history(q: str | None = None, _: User = Depends(require_roles("AD
         select(Sale.id).where(
             Sale.counterparty_id == Order.client_id,
             Sale.debt_amount > 0,
-        )
+        ).correlate(Order)
     )
-    query = select(Order).options(selectinload(Order.client), selectinload(Order.items).selectinload(OrderItem.item)).where(
+    query = select(Order, Sale).outerjoin(Sale, Sale.id == Order.sale_id).options(
+        selectinload(Order.client), selectinload(Order.items).selectinload(OrderItem.item)
+    ).where(
         Order.status == OrderStatus.DELIVERED,
         outstanding_debt,
     ).order_by(Order.delivered_at.desc(), Order.id.desc())
     if q and q.strip():
         search = f"%{q.strip()}%"
         query = query.where(Order.client.has((Counterparty.name.ilike(search)) | (Counterparty.phone.ilike(search))))
-    orders = (await session.execute(query)).scalars().all()
-    return [{
-        "order_id": order.id,
-        "invoice_number": order.invoice_number,
-        "client_name": order.client.name if order.client else "",
-        "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
-        "total": str(sum((item.quantity * item.price - (item.discount or 0) for item in order.items), Decimal(0)) - (order.discount_amount or 0)),
-        "items": [{"name": item.item.name, "quantity": str(item.quantity), "price": str(item.price), "discount": str(item.discount or 0)} for item in order.items],
-    } for order in orders]
+    rows = (await session.execute(query)).all()
+    result = []
+    for order, sale in rows:
+        if sale is None or sale.debt_amount <= 0:
+            try:
+                sale_id = await _recover_legacy_sale_id(session, order)
+            except ValueError:
+                continue
+            sale = await session.get(Sale, sale_id)
+        if sale is None or sale.debt_amount <= 0:
+            continue
+        result.append({
+            "order_id": order.id,
+            "sale_id": sale.id,
+            "invoice_number": order.invoice_number,
+            "client_name": order.client.name if order.client else "",
+            "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+            "debt_amount": str(sale.debt_amount),
+            "total": str(sum((item.quantity * item.price - (item.discount or 0) for item in order.items), Decimal(0)) - (order.discount_amount or 0)),
+            "items": [{"name": item.item.name, "quantity": str(item.quantity), "price": str(item.price), "discount": str(item.discount or 0)} for item in order.items],
+        })
+    return result
 
 
 @router.post("/users/{user_id}/password")
@@ -290,13 +308,18 @@ def build_order_query(
     user: User,
     limit: int = 10,
     offset: int = 0,
+    q: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    sort: str = "newest",
+    statuses: list[OrderStatus] | None = None,
 ):
     query = select(Order).options(
         selectinload(Order.client),
         selectinload(Order.courier),
         selectinload(Order.referrer),
         selectinload(Order.items).selectinload(OrderItem.item),
-    ).order_by(Order.created_at.desc(), Order.id.desc())
+    )
 
     if user.role != "ADMIN":
         if seller_id is not None and seller_id != user.id:
@@ -305,10 +328,37 @@ def build_order_query(
     elif seller_id is not None:
         query = query.where(Order.courier_id == seller_id)
 
+    selected_statuses = list(statuses or [])
     if status is not None:
-        query = query.where(Order.status == status)
+        selected_statuses.append(status)
+    if len(selected_statuses) == 1:
+        query = query.where(Order.status == selected_statuses[0])
+    elif selected_statuses:
+        query = query.where(Order.status.in_(selected_statuses))
 
-    return query.limit(max(1, min(limit, 100))).offset(max(0, offset))
+    if q and q.strip():
+        query = query.where(Order.client.has(Counterparty.name.ilike(f"%{q.strip()}%")))
+    if date_from:
+        query = query.where(Order.created_at >= datetime.combine(date_from, datetime_time.min, tzinfo=get_app_timezone()))
+    if date_to:
+        query = query.where(Order.created_at < datetime.combine(date_to + timedelta(days=1), datetime_time.min, tzinfo=get_app_timezone()))
+    if sort not in {"newest", "oldest", "customer_total"}:
+        raise ValueError("Недопустимый порядок сортировки")
+    if sort == "oldest":
+        query = query.order_by(Order.created_at.asc(), Order.id.asc())
+    elif sort == "customer_total":
+        customer_total = (
+            select(func.coalesce(func.sum(Sale.total_amount), 0))
+            .where(Sale.counterparty_id == Counterparty.id)
+            .correlate(Counterparty)
+            .scalar_subquery()
+        )
+        query = query.join(Counterparty, Counterparty.id == Order.client_id)
+        query = query.order_by(customer_total.desc(), Order.created_at.desc(), Order.id.desc())
+    else:
+        query = query.order_by(Order.created_at.desc(), Order.id.desc())
+
+    return query.limit(max(1, min(limit, 5000))).offset(max(0, offset))
 
 
 @router.get("/orders")
@@ -317,11 +367,17 @@ async def list_orders(
     limit: int = 10,
     offset: int = 0,
     seller_id: int | None = None,
+    q: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    sort: str = "newest",
+    statuses: Annotated[list[OrderStatus] | None, Query()] = None,
     user: User = Depends(require_section("orders")),
     session: AsyncSession = Depends(get_session),
 ):
     try:
-        query = build_order_query(status=status, seller_id=seller_id, user=user, limit=limit, offset=offset)
+        query = build_order_query(status=status, seller_id=seller_id, user=user, limit=min(limit, 100), offset=offset,
+                                  q=q, date_from=date_from, date_to=date_to, sort=sort, statuses=statuses)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     result = await session.execute(query)
@@ -356,6 +412,34 @@ async def list_orders(
             "created_at": order.created_at.isoformat() if order.created_at else None,
         }
         for order in result.scalars().all()
+    ]
+
+
+@router.get("/orders/product-totals")
+async def order_product_totals(
+    status: OrderStatus | None = None,
+    seller_id: int | None = None,
+    q: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    statuses: Annotated[list[OrderStatus] | None, Query()] = None,
+    user: User = Depends(require_section("orders")),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        query = build_order_query(status=status, seller_id=seller_id, user=user, limit=5000, offset=0,
+                                  q=q, date_from=date_from, date_to=date_to, statuses=statuses)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    orders = (await session.execute(query)).scalars().all()
+    quantities: dict[tuple[int, str, str], Decimal] = {}
+    for order in orders:
+        for line in order.items:
+            key = (line.item_id, line.item.name, line.item.unit)
+            quantities[key] = quantities.get(key, Decimal(0)) + line.quantity
+    return [
+        {"item_id": item_id, "item_name": name, "unit": unit, "quantity": str(quantity)}
+        for (item_id, name, unit), quantity in sorted(quantities.items(), key=lambda value: value[0][1].casefold())
     ]
 
 

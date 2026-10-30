@@ -27,6 +27,10 @@ def test_latest_revisions_upgrade_existing_schema_and_are_idempotent():
             connection.execute(text(
                 "CREATE TABLE orders (id INTEGER PRIMARY KEY, referred_by TEXT, referred_by_user_id INTEGER)"
             ))
+            connection.execute(text(
+                "CREATE TABLE sale_item_batch_allocations "
+                "(id INTEGER PRIMARY KEY, sale_item_id INTEGER, batch_id INTEGER, qty NUMERIC, unit_cost NUMERIC)"
+            ))
             connection.execute(text("INSERT INTO users VALUES (1, 'alice', 'Alice Smith')"))
             connection.execute(text("INSERT INTO users VALUES (2, 'bob', 'Bob Smith')"))
             connection.execute(text("INSERT INTO cash_transactions VALUES (1, 'EXPENSE', 25.00)"))
@@ -41,6 +45,8 @@ def test_latest_revisions_upgrade_existing_schema_and_are_idempotent():
                 "0007_manual_debts.py",
                 "0008_order_referrer_employee.py",
                 "0009_cash_company_expense.py",
+                "0010_audit_events.py",
+                "0011_allocation_unit_price.py",
             ):
                 revision_path = migrations_dir / revision_name
                 _run_revision(revision_path, connection)
@@ -59,6 +65,13 @@ def test_latest_revisions_upgrade_existing_schema_and_are_idempotent():
             }
             assert "is_company_expense" in {
                 column["name"] for column in inspector.get_columns("cash_transactions")
+            }
+            assert "audit_events" in inspector.get_table_names()
+            assert "unit_price" in {
+                column["name"] for column in inspector.get_columns("sale_item_batch_allocations")
+            }
+            assert "ix_audit_events_entity_created" in {
+                index["name"] for index in inspector.get_indexes("audit_events")
             }
             result = connection.execute(
                 text("SELECT id, referred_by_user_id FROM orders ORDER BY id")

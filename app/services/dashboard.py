@@ -106,6 +106,38 @@ async def build_dashboard_summary(
         daily_sales[day] = daily_sales.get(day, Decimal("0")) + Decimal(total_amount or 0)
     daily_sales = {day: amount.quantize(Decimal("0.01")) for day, amount in daily_sales.items()}
 
+    month_start = today.replace(day=1)
+    month_start_dt = datetime.combine(month_start, datetime.min.time(), tzinfo=tz)
+    next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    next_month_dt = datetime.combine(next_month, datetime.min.time(), tzinfo=tz)
+    monthly_sales = (await session.execute(
+        select(func.coalesce(func.sum(Sale.total_amount), 0), func.count(Sale.id))
+        .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
+    )).one()
+    monthly_products = (await session.execute(
+        select(
+            Item.id.label("item_id"), Item.name.label("item_name"), Item.unit.label("unit"),
+            func.sum(SaleItem.qty).label("quantity"),
+            func.sum(
+                SaleItem.qty * SaleItem.unit_price
+                * (Decimal("1") - SaleItem.discount_percent / Decimal("100"))
+            ).label("net_amount"),
+        )
+        .join(SaleItem, SaleItem.item_id == Item.id)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
+        .group_by(Item.id, Item.name, Item.unit)
+        .order_by(func.sum(SaleItem.qty * SaleItem.unit_price).desc(), Item.name)
+    )).all()
+    monthly_daily = (await session.execute(
+        select(Sale.created_at, Sale.total_amount)
+        .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
+    )).all()
+    monthly_by_day: dict[str, Decimal] = {}
+    for created_at, amount in monthly_daily:
+        day = _to_app_timezone(created_at, tz).date().isoformat()
+        monthly_by_day[day] = monthly_by_day.get(day, Decimal(0)) + Decimal(amount or 0)
+
     daily_cogs: dict[str, Decimal] = {}
     allocation_flow_result = await session.execute(
         select(
@@ -272,6 +304,26 @@ async def build_dashboard_summary(
 
     return {
         "sales_count": len(sales),
+        "monthly_sales": {
+            "total_amount": Decimal(monthly_sales[0] or 0).quantize(Decimal("0.01")),
+            "sales_count": int(monthly_sales[1] or 0),
+            "product_quantity": sum((Decimal(row.quantity or 0) for row in monthly_products), Decimal(0)),
+            "products": [
+                {
+                    "item_id": row.item_id,
+                    "item_name": row.item_name,
+                    "unit": row.unit,
+                    "quantity": Decimal(row.quantity or 0),
+                    "total_amount": Decimal(row.net_amount or 0).quantize(Decimal("0.01")),
+                }
+                for row in monthly_products
+            ],
+            "daily": [
+                {"day": (month_start + timedelta(days=offset)).isoformat(),
+                 "total_amount": monthly_by_day.get((month_start + timedelta(days=offset)).isoformat(), Decimal("0.00"))}
+                for offset in range((today - month_start).days + 1)
+            ],
+        },
         "production_count": len([
             batch for batch in batches
             if batch.remaining_qty > 0
