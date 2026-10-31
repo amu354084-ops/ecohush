@@ -56,13 +56,22 @@ jobs:
             compose exec -T web python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/ready', timeout=5)"
             git pull --ff-only origin main
             compose up -d db
+            db_ready=0
+            for attempt in $(seq 1 30); do
+              if compose exec -T db sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; then
+                db_ready=1
+                break
+              fi
+              sleep 2
+            done
+            test "$db_ready" -eq 1
+            mkdir -p backups
+            backup_file="backups/predeploy_$(date -u +%Y%m%d_%H%M%S).dump"
+            compose exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --no-owner --no-privileges --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' > "$backup_file"
+            test -s "$backup_file"
+            compose exec -T -i db pg_restore --list < "$backup_file" > /dev/null
+            echo "Verified PostgreSQL backup: $backup_file"
             compose build web
-            backup_file=$(compose run --rm --no-deps web sh /app/scripts/backup_postgres.sh)
-            case "$backup_file" in
-              /var/backups/erp/postgres_*.sql.gz) ;;
-              *) echo "PostgreSQL backup did not return a valid backup path" >&2; exit 1 ;;
-            esac
-            compose run --rm --no-deps web test -s "$backup_file"
             compose run --rm --no-deps web alembic upgrade head
             compose up -d web
             compose ps

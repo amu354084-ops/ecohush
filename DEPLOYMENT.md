@@ -141,10 +141,15 @@ curl -fsS http://127.0.0.1:1833/
 
 ## Backup
 
-Проверка backup выполняется внутри web-контейнера:
+Для production PostgreSQL создавайте backup через штатные утилиты контейнера `db`, а файл сохраняйте на хосте:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml exec web sh /app/scripts/backup_postgres.sh
+mkdir -p backups
+backup_file="backups/manual_$(date -u +%Y%m%d_%H%M%S).dump"
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --no-owner --no-privileges --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' > "$backup_file"
+test -s "$backup_file"
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T -i db pg_restore --list < "$backup_file" > /dev/null
+printf 'Verified backup: %s\n' "$backup_file"
 ```
 
 Для S3 заполните `TIMEWEB_S3_BUCKET`, `TIMEWEB_S3_ACCESS_KEY`, `TIMEWEB_S3_SECRET_KEY` и установите AWS CLI в образ/на сервер. После первой копии обязательно выполните тест восстановления на отдельной базе.
