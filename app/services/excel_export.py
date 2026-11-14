@@ -52,6 +52,17 @@ FIELD_LABELS = {
 }
 
 
+def _read_first_query(connection: sqlite3.Connection, *queries: str) -> pd.DataFrame:
+    """Run the first query the database schema supports."""
+    last_error: Exception | None = None
+    for query in queries:
+        try:
+            return _read_query(connection, query)
+        except (sqlite3.Error, pd.errors.DatabaseError) as exc:
+            last_error = exc
+    raise last_error if last_error is not None else ValueError("No query given")
+
+
 def _read_query(connection: sqlite3.Connection, query: str) -> pd.DataFrame:
     dataframe = pd.read_sql_query(query, connection)
     for column in dataframe.columns:
@@ -206,15 +217,35 @@ def export_database_to_excel(database_path: Path, output_directory: Path) -> Pat
             ORDER BY ct.created_at, ct.id
             """,
         )
-        cash_balance = _read_query(
+        cash_balance = _read_first_query(
             connection,
+            """
+            SELECT COALESCE(SUM(CASE
+                WHEN type = 'INCOME' THEN amount
+                WHEN type = 'EXPENSE' AND COALESCE(is_company_expense, 1) = 1 THEN -amount
+                ELSE 0 END), 0) AS balance
+            FROM cash_transactions
+            """,
+            # Older databases without the is_company_expense column.
             """
             SELECT COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE -amount END), 0) AS balance
             FROM cash_transactions
             """,
         )
-        debtors = _read_query(
+        debtors = _read_first_query(
             connection,
+            """
+            SELECT * FROM (
+                SELECT c.id, c.name, c.phone,
+                    COALESCE((SELECT SUM(s.debt_amount) FROM sales s WHERE s.counterparty_id = c.id), 0)
+                    + COALESCE((SELECT SUM(m.amount) FROM manual_debts m WHERE m.counterparty_id = c.id), 0)
+                    AS current_debt
+                FROM counterparties c
+            ) debts
+            WHERE current_debt <> 0
+            ORDER BY current_debt DESC, name
+            """,
+            # Older databases without sales/manual_debts tables.
             """
             SELECT id, name, phone, current_debt
             FROM counterparties

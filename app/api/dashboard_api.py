@@ -12,7 +12,7 @@ from app.api.auth_dependencies import require_section
 from app.db import async_session
 from app.models.schema import Order, OrderItem, OrderStatus, Sale, User
 from app.services.dashboard import build_dashboard_summary
-from app.services.timezone import get_app_timezone
+from app.services.timezone import get_app_timezone, to_db_datetime
 
 
 async def get_session() -> AsyncSession:
@@ -66,9 +66,9 @@ async def seller_performance(
         Order.status == OrderStatus.DELIVERED,
     ).order_by(sale_timestamp.desc(), Order.id.desc())
     if date_from:
-        sales_query = sales_query.where(sale_timestamp >= datetime.combine(date_from, time.min, tzinfo=tz))
+        sales_query = sales_query.where(sale_timestamp >= to_db_datetime(datetime.combine(date_from, time.min, tzinfo=tz)))
     if date_to:
-        sales_query = sales_query.where(sale_timestamp <= datetime.combine(date_to, time.max, tzinfo=tz))
+        sales_query = sales_query.where(sale_timestamp <= to_db_datetime(datetime.combine(date_to, time.max, tzinfo=tz)))
     sales = (await session.execute(sales_query)).all()
 
     source_totals: dict[tuple[int | None, str], dict[str, int | str | Decimal]] = {}

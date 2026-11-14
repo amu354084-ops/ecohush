@@ -15,9 +15,9 @@ from app.api.auth_dependencies import require_section
 from app.db import async_session
 from app.models.schema import Item, PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
 from app.services.localization import display_label
-from app.services.reports import build_pnl_summary
+from app.services.reports import build_pnl_summary, returned_sale_condition
 from app.services.google_sheets import sync_report_sections
-from app.services.timezone import get_app_timezone
+from app.services.timezone import get_app_timezone, to_db_datetime
 
 
 async def get_session() -> AsyncSession:
@@ -30,7 +30,7 @@ router = APIRouter(dependencies=[Depends(require_section("reports"))])
 
 
 def _period_datetime(value: date, boundary: time) -> datetime:
-    return datetime.combine(value, boundary, tzinfo=get_app_timezone())
+    return to_db_datetime(datetime.combine(value, boundary, tzinfo=get_app_timezone()))
 
 
 def _excel_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -61,6 +61,7 @@ async def _products_sold_rows(
         )
         .join(SaleItem, SaleItem.item_id == Item.id)
         .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(~returned_sale_condition())
         .group_by(Item.id, Item.name, Item.code, Item.unit)
     )
     if date_from:

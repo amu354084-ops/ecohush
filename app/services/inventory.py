@@ -38,7 +38,7 @@ async def deduct_fifo(
             Batch.warehouse_id == target_warehouse_id,
             Batch.remaining_qty > 0,
         )
-        .order_by(Batch.created_at.asc())
+        .order_by(Batch.created_at.asc(), Batch.id.asc())
         .with_for_update()
     )
 
@@ -95,8 +95,10 @@ async def create_batch(
     purchase_cost: Decimal,
     qty: Decimal,
     sale_price: Decimal | None = None,
+    allow_zero_cost: bool = False,
 ) -> Batch:
-    if purchase_cost <= 0:
+    # Scrap/waste batches legitimately have no value, every other batch needs a real cost.
+    if purchase_cost < 0 or (purchase_cost == 0 and not allow_zero_cost):
         raise ValueError("Себестоимость партии обязательна и должна быть больше нуля")
     if qty <= 0:
         raise ValueError("Batch quantity must be positive")
@@ -133,7 +135,16 @@ async def adjust_stock(
         raise ValueError("Adjustment quantity must not be zero")
 
     if delta_qty > 0:
-        cost = unit_cost if unit_cost is not None else Decimal("0")
+        cost = unit_cost if unit_cost is not None and unit_cost > 0 else None
+        if cost is None:
+            cost = await session.scalar(
+                select(Batch.purchase_cost)
+                .where(Batch.item_id == item_id, Batch.purchase_cost > 0)
+                .order_by(Batch.created_at.desc(), Batch.id.desc())
+                .limit(1)
+            )
+        if cost is None:
+            raise ValueError("Укажите себестоимость: у товара ещё нет партий, из которых её можно взять")
         batch = await create_batch(
             session=session,
             item_id=item_id,

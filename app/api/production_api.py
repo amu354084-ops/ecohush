@@ -5,11 +5,12 @@ from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_dependencies import require_section
+from app.api.auth_dependencies import current_user, require_section, user_permissions
 from app.db import async_session
-from app.models.schema import ProductionOrderStatus
+from app.models.schema import Order, ProductionOrderStatus, User
 from app.services.production import (
     complete_production_order,
     create_production_order,
@@ -125,9 +126,21 @@ async def run_production(
 
 
 @router.post("/return", response_model=ReturnResponse)
-async def handle_return(request: ReturnRequest, session: AsyncSession = session_dependency) -> ReturnResponse:
+async def handle_return(
+    request: ReturnRequest,
+    user: User = Depends(current_user),
+    session: AsyncSession = session_dependency,
+) -> ReturnResponse:
+    if user.role != "ADMIN" and "orders_edit_delivered" not in user_permissions(user):
+        raise HTTPException(status_code=403, detail="Нет права оформлять возвраты")
     try:
         async with session.begin():
+            linked_order_id = await session.scalar(select(Order.id).where(Order.sale_id == request.sale_id).limit(1))
+            if linked_order_id is not None:
+                raise ValueError(
+                    f"Эта продажа создана из заявки №{linked_order_id}. "
+                    "Измените или удалите заявку — товар и деньги вернутся автоматически"
+                )
             result = await process_return(
                 session=session,
                 sale_id=request.sale_id,

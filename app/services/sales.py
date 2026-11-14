@@ -26,11 +26,23 @@ async def checkout_sale(
     items: list[dict[str, Any]],
     paid_amount: Decimal,
     payment_method: PaymentMethod,
+    use_item_prices: bool = False,
+    total_discount: Decimal = Decimal(0),
 ) -> dict[str, Any]:
+    """Create a sale.
+
+    ``use_item_prices`` is used for orders: the price the client agreed to (and saw on the
+    invoice) is taken from ``item["unit_price"]`` instead of the current FIFO batch prices.
+    """
     if paid_amount < 0:
         raise ValueError("Paid amount must be non-negative")
     if not items:
         raise ValueError("At least one sale item is required")
+    counterparty: Counterparty | None = None
+    if counterparty_id is not None:
+        counterparty = await session.get(Counterparty, counterparty_id)
+        if counterparty is None:
+            raise ValueError("Counterparty not found")
 
     total_amount = Decimal(0)
     batch_details: list[dict[str, Any]] = []
@@ -55,12 +67,18 @@ async def checkout_sale(
         )
         if any(move["unit_cost"] <= 0 for move in moves):
             raise ValueError("Нельзя оформить продажу: у партии отсутствует себестоимость")
-        if any(move["unit_price"] <= 0 for move in moves):
-            raise ValueError("Нельзя оформить продажу: у партии отсутствует цена продажи")
-        unit_price = sum(
-            (move["qty"] * move["unit_price"] for move in moves),
-            Decimal(0),
-        ) / qty
+        agreed_price = item_data.get("unit_price") if use_item_prices else None
+        if agreed_price is not None:
+            unit_price = Decimal(agreed_price)
+            if unit_price <= 0:
+                raise ValueError("Нельзя оформить продажу: в заявке отсутствует цена")
+        else:
+            if any(move["unit_price"] <= 0 for move in moves):
+                raise ValueError("Нельзя оформить продажу: у партии отсутствует цена продажи")
+            unit_price = sum(
+                (move["qty"] * move["unit_price"] for move in moves),
+                Decimal(0),
+            ) / qty
         discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
         unit_cost = cost / qty if qty != 0 else Decimal(0)
 
@@ -89,6 +107,10 @@ async def checkout_sale(
             }
         )
 
+    if total_discount < 0:
+        raise ValueError("Discount must be non-negative")
+    # Whole-order discount (set when an order is accepted) reduces the amount the client owes.
+    total_amount = max(Decimal(0), total_amount - total_discount)
     if paid_amount > total_amount:
         raise ValueError(f"Paid amount cannot exceed sale total: {total_amount}")
     debt_amount = max(Decimal(0), total_amount - paid_amount)
@@ -124,10 +146,7 @@ async def checkout_sale(
         )
         session.add(cash_tx)
 
-    if counterparty_id is not None and debt_amount > 0:
-        counterparty = await session.scalar(select(Counterparty).where(Counterparty.id == counterparty_id))
-        if counterparty is None:
-            raise ValueError("Counterparty not found")
+    if counterparty is not None and debt_amount > 0:
         counterparty.current_debt += debt_amount
 
     await session.flush()
@@ -143,7 +162,7 @@ async def checkout_sale(
                 "qty": item.qty,
                 "unit_price": item.unit_price,
                 "cost_price": item.cost_price,
-                "discount_percent": 0,
+                "discount_percent": item.discount_percent,
             }
             for item in sale_items
         ],
@@ -187,7 +206,7 @@ async def repay_client_debt(
         if remaining <= 0:
             break
 
-    counterparty.current_debt = outstanding - amount
+    counterparty.current_debt = max(Decimal(0), (counterparty.current_debt or Decimal(0)) - amount)
     transaction = CashTransaction(
         type=CashTransactionType.INCOME,
         amount=amount,

@@ -42,6 +42,8 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 volumes:
   postgres_prod_data:

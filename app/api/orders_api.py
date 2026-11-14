@@ -17,7 +17,7 @@ from app.api.auth_dependencies import ALL_PERMISSIONS, SECTION_DEFAULT_ROLES, cu
 from app.models.schema import Counterparty, Item, ItemType, Order, OrderItem, OrderPaymentType, OrderStatus, Sale, User
 from app.services.auth import create_token, hash_password, verify_password
 from app.services.invoice import invoice_html
-from app.services.timezone import get_app_timezone
+from app.services.timezone import get_app_timezone, to_db_datetime
 from app.services.orders import _recover_legacy_sale_id, accept_order, create_order, delete_order, reject_order, reverse_delivered_order, transition_order, update_order
 
 router = APIRouter()
@@ -86,12 +86,20 @@ class UserPermissionsRequest(BaseModel):
     permissions: list[str] = Field(default_factory=list)
 
 
+def _ensure_own_order(user: User, order: Order) -> None:
+    """Non-admin employees may only work with orders they created (same rule as the order list)."""
+    if user.role != "ADMIN" and order.courier_id != user.id:
+        raise HTTPException(status_code=403, detail="Доступ только к своим заказам")
+
+
 @router.post("/login")
 async def login(request: LoginRequest, http_request: Request, session: AsyncSession = Depends(get_session)):
     now = time.monotonic()
     client_key = f"{http_request.client.host if http_request.client else 'unknown'}:{request.username.casefold()}"
+    user_key = f"user:{request.username.casefold()}"
     failures = [stamp for stamp in _login_failures.get(client_key, []) if now - stamp < LOGIN_WINDOW_SECONDS]
-    if len(failures) >= LOGIN_MAX_FAILURES:
+    user_failures = [stamp for stamp in _login_failures.get(user_key, []) if now - stamp < LOGIN_WINDOW_SECONDS]
+    if len(failures) >= LOGIN_MAX_FAILURES or len(user_failures) >= LOGIN_MAX_FAILURES * 3:
         raise HTTPException(status_code=429, detail="Слишком много попыток входа. Повторите через минуту")
     user = (
         await session.execute(
@@ -102,8 +110,11 @@ async def login(request: LoginRequest, http_request: Request, session: AsyncSess
     if user is None or not user.is_active or not verify_password(request.password, user.password_hash):
         failures.append(now)
         _login_failures[client_key] = failures
+        user_failures.append(now)
+        _login_failures[user_key] = user_failures
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     _login_failures.pop(client_key, None)
+    _login_failures.pop(user_key, None)
     return {
         "access_token": create_token(user),
         "token_type": "bearer",
@@ -339,9 +350,9 @@ def build_order_query(
     if q and q.strip():
         query = query.where(Order.client.has(Counterparty.name.ilike(f"%{q.strip()}%")))
     if date_from:
-        query = query.where(Order.created_at >= datetime.combine(date_from, datetime_time.min, tzinfo=get_app_timezone()))
+        query = query.where(Order.created_at >= to_db_datetime(datetime.combine(date_from, datetime_time.min, tzinfo=get_app_timezone())))
     if date_to:
-        query = query.where(Order.created_at < datetime.combine(date_to + timedelta(days=1), datetime_time.min, tzinfo=get_app_timezone()))
+        query = query.where(Order.created_at < to_db_datetime(datetime.combine(date_to + timedelta(days=1), datetime_time.min, tzinfo=get_app_timezone())))
     if sort not in {"newest", "oldest", "customer_total"}:
         raise ValueError("Недопустимый порядок сортировки")
     if sort == "oldest":
@@ -453,6 +464,7 @@ async def update(
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    _ensure_own_order(user, order)
     permissions = user_permissions(user)
     if user.role != "ADMIN" and order.status != OrderStatus.DELIVERED and "orders_edit" not in permissions:
         raise HTTPException(status_code=403, detail="Нет отдельного права изменять заявки")
@@ -483,6 +495,7 @@ async def remove(order_id: int, user: User = Depends(require_section("orders")),
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    _ensure_own_order(user, order)
     permissions = user_permissions(user)
     if order.status == OrderStatus.DELIVERED:
         if "orders_edit_delivered" not in permissions:
@@ -519,8 +532,7 @@ async def order_invoice(
     order = await session.scalar(query)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
-    if user.role == "COURIER" and order.courier_id != user.id:
-        raise HTTPException(status_code=403, detail="Доступ только к своим заказам")
+    _ensure_own_order(user, order)
     if order.status not in (OrderStatus.ACCEPTED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED):
         raise HTTPException(status_code=404, detail="Накладная доступна только для принятых и доставленных заказов")
     return HTMLResponse(invoice_html(order))
@@ -545,8 +557,7 @@ async def transition(order_id: int, data: TransitionRequest, user: User = Depend
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
-    if user.role == "COURIER" and order.courier_id != user.id:
-        raise HTTPException(status_code=403, detail="Доступ только к своим заказам")
+    _ensure_own_order(user, order)
     order = await transition_order(
         session, order_id, data.status, data.payment_type, actor=user, paid_amount=data.paid_amount
     )
@@ -555,7 +566,7 @@ async def transition(order_id: int, data: TransitionRequest, user: User = Depend
 
 
 @router.post("/orders/{order_id}/deliver")
-async def deliver(order_id: int, data: TransitionRequest, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+async def deliver(order_id: int, data: TransitionRequest, user: User = Depends(require_section("orders")), session: AsyncSession = Depends(get_session)):
     if data.payment_type is None:
         raise HTTPException(status_code=400, detail="Выберите тип оплаты")
     if user.role == "COURIER" and not user.can_change_status:
@@ -563,8 +574,7 @@ async def deliver(order_id: int, data: TransitionRequest, user: User = Depends(c
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
-    if user.role == "COURIER" and order.courier_id != user.id:
-        raise HTTPException(status_code=403, detail="Доступ только к своим заказам")
+    _ensure_own_order(user, order)
     order = await transition_order(
         session, order_id, OrderStatus.DELIVERED, data.payment_type, actor=user, paid_amount=data.paid_amount
     )

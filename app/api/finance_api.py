@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from datetime import date, datetime, time
+from datetime import date
 from io import BytesIO
 from typing import AsyncGenerator
 
@@ -16,6 +16,7 @@ from app.models.schema import CashTransaction, CashTransactionType, Counterparty
 from app.api.auth_dependencies import require_roles
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary
+from app.services.timezone import local_day_end, local_day_start
 
 
 class OverheadCreateRequest(BaseModel):
@@ -108,8 +109,8 @@ async def finance_overview(
 ) -> dict[str, str]:
     summary = await build_pnl_summary(
         session,
-        datetime.combine(date_from, time.min) if date_from else None,
-        datetime.combine(date_to, time.max) if date_to else None,
+        local_day_start(date_from) if date_from else None,
+        local_day_end(date_to) if date_to else None,
     )
 
     return {
@@ -147,9 +148,9 @@ async def list_transactions(
         .offset(max(0, offset))
     )
     if date_from:
-        stmt = stmt.where(CashTransaction.created_at >= datetime.combine(date_from, time.min))
+        stmt = stmt.where(CashTransaction.created_at >= local_day_start(date_from))
     if date_to:
-        stmt = stmt.where(CashTransaction.created_at <= datetime.combine(date_to, time.max))
+        stmt = stmt.where(CashTransaction.created_at <= local_day_end(date_to))
     result = await session.execute(stmt)
     transactions = result.scalars().all()
 
@@ -190,9 +191,9 @@ async def list_overheads(
         .offset(max(0, offset))
     )
     if date_from:
-        stmt = stmt.where(OverheadExpense.created_at >= datetime.combine(date_from, time.min))
+        stmt = stmt.where(OverheadExpense.created_at >= local_day_start(date_from))
     if date_to:
-        stmt = stmt.where(OverheadExpense.created_at <= datetime.combine(date_to, time.max))
+        stmt = stmt.where(OverheadExpense.created_at <= local_day_end(date_to))
     result = await session.execute(stmt)
     return [
         OverheadResponse(
@@ -341,11 +342,11 @@ async def export_transactions(
     )
     if date_from:
         transaction_stmt = transaction_stmt.where(
-            CashTransaction.created_at >= datetime.combine(date_from, time.min)
+            CashTransaction.created_at >= local_day_start(date_from)
         )
     if date_to:
         transaction_stmt = transaction_stmt.where(
-            CashTransaction.created_at <= datetime.combine(date_to, time.max)
+            CashTransaction.created_at <= local_day_end(date_to)
         )
     result = await session.execute(transaction_stmt)
     rows = []
@@ -366,9 +367,9 @@ async def export_transactions(
         })
     overhead_stmt = select(OverheadExpense).order_by(OverheadExpense.id.desc())
     if date_from:
-        overhead_stmt = overhead_stmt.where(OverheadExpense.created_at >= datetime.combine(date_from, time.min))
+        overhead_stmt = overhead_stmt.where(OverheadExpense.created_at >= local_day_start(date_from))
     if date_to:
-        overhead_stmt = overhead_stmt.where(OverheadExpense.created_at <= datetime.combine(date_to, time.max))
+        overhead_stmt = overhead_stmt.where(OverheadExpense.created_at <= local_day_end(date_to))
     overhead_result = await session.execute(overhead_stmt)
     overhead_rows = [
         {

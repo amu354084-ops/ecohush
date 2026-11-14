@@ -58,10 +58,11 @@ def cleanup_old_backups(directory: Path | None = None) -> int:
         if datetime.fromtimestamp(archive.stat().st_mtime) < threshold:
             archive.unlink()
             removed += 1
-    for database in target.glob("backup_*.db"):
-        if datetime.fromtimestamp(database.stat().st_mtime) < threshold:
-            database.unlink()
-            removed += 1
+    for pattern in ("backup_*.db", "backup_*.db-wal", "backup_*.db-shm", "backup_*.dump"):
+        for database in target.glob(pattern):
+            if datetime.fromtimestamp(database.stat().st_mtime) < threshold:
+                database.unlink()
+                removed += 1
     return removed
 
 
@@ -163,7 +164,7 @@ def create_local_backup(notify_telegram: bool = True) -> dict[str, Any]:
     if DATABASE_URL.startswith(("postgresql+asyncpg://", "postgresql://")):
         database_backup = create_database_backup()
         snapshot_path = Path(database_backup["path"])
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         archive_path = target_directory / f"backup_{timestamp}.zip"
         database_hash = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
         manifest = {
@@ -200,7 +201,7 @@ def create_local_backup(notify_telegram: bool = True) -> dict[str, Any]:
         database_backup = None
     excel_directory = target_directory / f"excel_{datetime.now():%Y_%m_%d}"
     excel_path: Path | None = None
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_path = target_directory / f"backup_{timestamp}.zip"
     # Use the SQLite snapshot for both files so the archive is internally consistent.
     snapshot_path = Path(database_backup["path"]) if database_backup else source

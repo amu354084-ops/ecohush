@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +20,7 @@ async def add_stock(
     comment: str | None = None,
     txn_type: StockTransactionType = StockTransactionType.INBOUND,
     sale_price: Decimal | None = None,
+    created_at: datetime | None = None,
 ) -> Batch:
     if qty <= 0:
         raise ValueError("Quantity must be positive")
@@ -39,6 +41,9 @@ async def add_stock(
         initial_qty=qty,
         remaining_qty=qty,
     )
+    if created_at is not None:
+        # Keep the original receipt date so FIFO order survives a transfer between warehouses.
+        batch.created_at = created_at
     session.add(batch)
     await session.flush()
     await session.refresh(batch)
@@ -63,7 +68,8 @@ async def move_stock(
     source_batches = await session.execute(
         select(Batch)
         .where(Batch.item_id == item_id, Batch.warehouse_id == from_warehouse_id, Batch.remaining_qty > 0)
-        .order_by(Batch.created_at.asc())
+        .order_by(Batch.created_at.asc(), Batch.id.asc())
+        .with_for_update()
     )
     batches = source_batches.scalars().all()
     remaining = qty
@@ -79,6 +85,7 @@ async def move_stock(
             "qty": deduct_qty,
             "purchase_cost": batch.purchase_cost,
             "sale_price": batch.sale_price,
+            "created_at": batch.created_at,
         })
         await create_stock_transaction(
             session,
@@ -103,6 +110,7 @@ async def move_stock(
                 comment or "Move in",
                 StockTransactionType.TRANSFER_IN,
                 moved_batch["sale_price"],
+                created_at=moved_batch["created_at"],
             )
         )
     return {

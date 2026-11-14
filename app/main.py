@@ -38,7 +38,6 @@ from app.services.backup import schedule_backups
 from app.services.google_sheets import schedule_google_sheets
 from app.services.telegram_bot import run_telegram_bot
 
-from app.services.orders import renumber_invoice_numbers
 from app.services.seed import seed_initial_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -300,7 +299,8 @@ async def lifespan(app: FastAPI):
         await ensure_sqlite_inventory_indexes(conn)
     async with async_session() as session:
         async with session.begin():
-            await renumber_invoice_numbers(session)
+            # Invoice numbers are issued once and must never change after a restart,
+            # so the old start-up renumbering is intentionally not run here.
             await seed_initial_data(session)
     scheduler = schedule_backups()
 

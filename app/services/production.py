@@ -13,7 +13,6 @@ from app.models.schema import (
     BOMItem,
     CashTransaction,
     CashTransactionType,
-    OverheadExpense,
     PaymentMethod,
     Sale,
     SaleItem,
@@ -151,6 +150,7 @@ async def execute_production(
             warehouse_id=WarehouseType.SCRAP,
             purchase_cost=Decimal(0),
             qty=waste_qty,
+            allow_zero_cost=True,
         )
         await create_stock_transaction(
             session=session,
@@ -161,12 +161,8 @@ async def execute_production(
         )
         scrap_entries.append({"item_id": item_id, "qty": waste_qty})
 
-    overhead_record = OverheadExpense(
-        production_run_id=None,
-        category="Production overhead",
-        amount=additional_overheads,
-    )
-    session.add(overhead_record)
+    # Overheads are already included in the finished batch cost (and reach COGS when sold),
+    # so they are not recorded again as a separate operating expense.
 
     await session.flush()
 
@@ -213,6 +209,7 @@ async def process_return(
                 warehouse_id=WarehouseType.SCRAP,
                 purchase_cost=Decimal(0),
                 qty=sale_item.qty,
+                allow_zero_cost=True,
             )
             await create_stock_transaction(
                 session=session,
@@ -261,10 +258,15 @@ async def process_return(
         counterparty.current_debt = max(Decimal(0), counterparty.current_debt - original_debt)
 
     if cash_refund > 0:
+        try:
+            refund_method = PaymentMethod(str(sale.payment_method or PaymentMethod.CASH.value).split(".")[-1])
+        except ValueError:
+            refund_method = PaymentMethod.CASH
         session.add(CashTransaction(
             type=CashTransactionType.EXPENSE,
             amount=cash_refund,
-            payment_method=PaymentMethod.CASH,
+            # Refund goes back the same way the client paid (cash or bank).
+            payment_method=refund_method,
             counterparty_id=sale.counterparty_id,
             description=f"Return processed: {comment}",
         ))

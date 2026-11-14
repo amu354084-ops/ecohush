@@ -19,9 +19,10 @@ from app.models.schema import (
     SaleItem,
     SaleItemBatchAllocation,
     User,
+    WarehouseType,
 )
-from app.services.reports import build_pnl_summary
-from app.services.timezone import get_app_timezone
+from app.services.reports import build_pnl_summary, returned_sale_condition
+from app.services.timezone import get_app_timezone, to_db_datetime
 
 
 def _to_app_timezone(value: datetime, app_timezone) -> datetime:
@@ -35,6 +36,9 @@ async def build_dashboard_summary(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> dict[str, Any]:
+    local_from, local_to = date_from, date_to
+    date_from = to_db_datetime(date_from)
+    date_to = to_db_datetime(date_to)
     sales_stmt = select(Sale)
     if date_from:
         sales_stmt = sales_stmt.where(Sale.created_at >= date_from)
@@ -62,7 +66,7 @@ async def build_dashboard_summary(
     total_stock_qty = sum((batch.remaining_qty or Decimal("0")) for batch in batches)
     stock_by_item: dict[int, Decimal] = {}
     for batch in batches:
-        if batch.item_id is None:
+        if batch.item_id is None or batch.warehouse_id == WarehouseType.SCRAP:
             continue
         stock_by_item[batch.item_id] = stock_by_item.get(batch.item_id, Decimal("0")) + (
             batch.remaining_qty or Decimal("0")
@@ -87,11 +91,11 @@ async def build_dashboard_summary(
     tz = get_app_timezone()
     today = datetime.now(tz).date()
     default_chart_start = today - timedelta(days=89)
-    chart_start = date_from.date() if date_from else default_chart_start
-    chart_end = date_to.date() if date_to else today
+    chart_start = (local_from.astimezone(tz) if local_from.tzinfo else local_from).date() if local_from else default_chart_start
+    chart_end = (local_to.astimezone(tz) if local_to.tzinfo else local_to).date() if local_to else today
 
-    chart_start_dt = datetime.combine(chart_start, datetime.min.time(), tzinfo=tz)
-    chart_end_dt = datetime.combine(chart_end, datetime.max.time(), tzinfo=tz)
+    chart_start_dt = to_db_datetime(datetime.combine(chart_start, datetime.min.time(), tzinfo=tz))
+    chart_end_dt = to_db_datetime(datetime.combine(chart_end, datetime.max.time(), tzinfo=tz))
 
     daily_sales: dict[str, Decimal] = {}
     daily_result = await session.execute(
@@ -107,9 +111,9 @@ async def build_dashboard_summary(
     daily_sales = {day: amount.quantize(Decimal("0.01")) for day, amount in daily_sales.items()}
 
     month_start = today.replace(day=1)
-    month_start_dt = datetime.combine(month_start, datetime.min.time(), tzinfo=tz)
+    month_start_dt = to_db_datetime(datetime.combine(month_start, datetime.min.time(), tzinfo=tz))
     next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-    next_month_dt = datetime.combine(next_month, datetime.min.time(), tzinfo=tz)
+    next_month_dt = to_db_datetime(datetime.combine(next_month, datetime.min.time(), tzinfo=tz))
     monthly_sales = (await session.execute(
         select(func.coalesce(func.sum(Sale.total_amount), 0), func.count(Sale.id))
         .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
@@ -126,6 +130,7 @@ async def build_dashboard_summary(
         .join(SaleItem, SaleItem.item_id == Item.id)
         .join(Sale, Sale.id == SaleItem.sale_id)
         .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
+        .where(~returned_sale_condition())
         .group_by(Item.id, Item.name, Item.unit)
         .order_by(func.sum(SaleItem.qty * SaleItem.unit_price).desc(), Item.name)
     )).all()
@@ -147,6 +152,7 @@ async def build_dashboard_summary(
         .join(SaleItem, SaleItem.sale_id == Sale.id)
         .join(SaleItemBatchAllocation, SaleItemBatchAllocation.sale_item_id == SaleItem.id)
         .where(Sale.created_at >= chart_start_dt, Sale.created_at <= chart_end_dt)
+        .where(~returned_sale_condition())
     )
     for created_at, amount in allocation_flow_result:
         local_created_at = _to_app_timezone(created_at, tz)
@@ -160,6 +166,7 @@ async def build_dashboard_summary(
             Sale.created_at >= chart_start_dt,
             Sale.created_at <= chart_end_dt,
             ~exists().where(SaleItemBatchAllocation.sale_item_id == SaleItem.id),
+            ~returned_sale_condition(),
         )
     )
     for created_at, amount in legacy_flow_result:
@@ -347,8 +354,8 @@ async def build_dashboard_summary(
         "operating_expenses": pnl["operating_expenses"],
         "financial_check": financial_check,
         "period": {
-            "from": date_from.date().isoformat() if date_from else None,
-            "to": date_to.date().isoformat() if date_to else None,
+            "from": local_from.date().isoformat() if local_from else None,
+            "to": local_to.date().isoformat() if local_to else None,
         },
         "chart": {
             "revenue": pnl["revenue"],

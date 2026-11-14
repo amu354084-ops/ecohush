@@ -328,6 +328,8 @@ async def _complete_delivery(
         items=sale_items,
         paid_amount=paid_amount,
         payment_method=PaymentMethod.BANK if payment_type == OrderPaymentType.BANK else PaymentMethod.CASH,
+        use_item_prices=True,
+        total_discount=order.discount_amount or Decimal(0),
     )
     order.status = OrderStatus.DELIVERED
     order.payment_type = payment_type

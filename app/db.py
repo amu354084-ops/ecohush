@@ -27,3 +27,16 @@ engine: AsyncEngine = create_async_engine(
     connect_args={"timeout": 30} if use_sqlite == "1" else {},
 )
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+if use_sqlite == "1":
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_connection_pragmas(dbapi_connection, _connection_record) -> None:
+        # These PRAGMAs are per connection; previously they were set only on the
+        # start-up connection, so pooled connections ran without foreign-key checks.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()

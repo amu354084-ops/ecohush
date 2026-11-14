@@ -7,17 +7,17 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.auth_dependencies import require_roles, require_section, user_permissions
 from app.db import async_session
 from app.models.schema import User
-from app.models.schema import AuditEvent, CashTransaction, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
+from app.models.schema import AuditEvent, CashTransaction, CashTransactionType, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
 from app.services.sales import repay_client_debt
-from app.services.timezone import get_app_timezone
+from app.services.timezone import get_app_timezone, to_db_datetime
 
 
 class ClientCreateRequest(BaseModel):
@@ -154,6 +154,13 @@ async def list_audit_events(
     ]
 
 
+def _signed_cash_amount():
+    return case(
+        (CashTransaction.type == CashTransactionType.EXPENSE, -CashTransaction.amount),
+        else_=CashTransaction.amount,
+    )
+
+
 @router.get("/list", response_model=list[ClientResponse])
 async def list_clients(
     q: str | None = None,
@@ -164,14 +171,14 @@ async def list_clients(
     session: AsyncSession = session_dependency,
 ) -> list[ClientResponse]:
     if as_of:
-        end_of_day = datetime.combine(as_of, time.max, tzinfo=get_app_timezone())
+        end_of_day = to_db_datetime(datetime.combine(as_of, time.max, tzinfo=get_app_timezone()))
         sales_total = select(func.coalesce(func.sum(Sale.total_amount), 0)).where(
             Sale.counterparty_id == Counterparty.id,
             Sale.created_at <= end_of_day,
         ).scalar_subquery()
-        paid_total = select(func.coalesce(func.sum(CashTransaction.amount), 0)).where(
+        # Refunds (EXPENSE) reduce what the client has paid; previously they were counted as payments.
+        paid_total = select(func.coalesce(func.sum(_signed_cash_amount()), 0)).where(
             CashTransaction.counterparty_id == Counterparty.id,
-            CashTransaction.amount > 0,
             CashTransaction.created_at <= end_of_day,
         ).scalar_subquery()
         manual_debt_total = select(func.coalesce(func.sum(ManualDebt.amount), 0)).where(
@@ -263,7 +270,7 @@ async def client_history(
         select(func.coalesce(func.sum(Sale.total_amount), 0)).where(Sale.counterparty_id == client_id)
     )
     paid_total = await session.scalar(
-        select(func.coalesce(func.sum(CashTransaction.amount), 0)).where(CashTransaction.counterparty_id == client_id)
+        select(func.coalesce(func.sum(_signed_cash_amount()), 0)).where(CashTransaction.counterparty_id == client_id)
     )
     calculated_debt = await session.scalar(
         select(func.coalesce(func.sum(Sale.debt_amount), 0)).where(Sale.counterparty_id == client_id)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -15,6 +15,7 @@ from pydantic import Field
 from decimal import Decimal
 from app.services.inventory import create_batch
 from app.services.localization import display_label
+from app.services.timezone import local_day_end, local_day_start
 from app.api.auth_dependencies import current_user, require_roles, require_section, user_permissions
 
 
@@ -507,8 +508,8 @@ async def read_stock_history(
     rows = await get_stock_history(
         session=session,
         warehouse_id=warehouse_id,
-        date_from=datetime.combine(date_from, time.min) if date_from else None,
-        date_to=datetime.combine(date_to, time.max) if date_to else None,
+        date_from=local_day_start(date_from) if date_from else None,
+        date_to=local_day_end(date_to) if date_to else None,
         limit=max(1, min(limit, 5000)),
         offset=max(0, offset),
     )
@@ -528,8 +529,8 @@ async def export_stock_history(
     data, filename, media_type = await export_stock_history_excel(
         session=session,
         warehouse_id=warehouse_id,
-        date_from=datetime.combine(date_from, time.min) if date_from else None,
-        date_to=datetime.combine(date_to, time.max) if date_to else None,
+        date_from=local_day_start(date_from) if date_from else None,
+        date_to=local_day_end(date_to) if date_to else None,
     )
     return Response(
         content=data,

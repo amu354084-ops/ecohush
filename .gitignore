@@ -16,6 +16,7 @@ ruff-output.txt
 __pycache__/
 *.py[cod]
 .venv/
+.venv*/
 .pytest_cache/
 .ruff_cache/
 

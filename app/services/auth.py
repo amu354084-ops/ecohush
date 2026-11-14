@@ -35,9 +35,9 @@ def ensure_env_file(project_root: Path | str | None = None) -> Path:
     updates: list[str] = []
     for key, value in DEFAULT_ENV_VALUES.items():
         os.environ.setdefault(key, value)
+        # Only add missing keys: re-appending keys that exist with an empty value
+        # made .env grow by one duplicate line on every start.
         if key not in existing_pairs:
-            updates.append(f"{key}={value}")
-        elif existing_pairs[key] in ("", None):
             updates.append(f"{key}={value}")
 
     if updates:
