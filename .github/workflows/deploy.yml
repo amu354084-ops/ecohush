@@ -54,6 +54,17 @@ jobs:
               docker compose --env-file .env.production -f docker-compose.prod.yml "$@"
             }
             compose exec -T web python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1833/ready', timeout=5)"
+            git fetch origin main
+            if ! git diff --quiet; then
+              mkdir -p backups
+              git diff > "backups/server_local_changes_$(date -u +%Y%m%d_%H%M%S).patch"
+              for changed_file in $(git diff --name-only); do
+                if git diff --quiet origin/main -- "$changed_file"; then
+                  echo "Server edit of $changed_file is already in the new release"
+                  git checkout -- "$changed_file"
+                fi
+              done
+            fi
             git pull --ff-only origin main
             compose up -d db
             db_ready=0
