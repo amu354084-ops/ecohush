@@ -16,7 +16,7 @@ from app.db import async_session
 from app.models.schema import User
 from app.models.schema import AuditEvent, CashTransaction, CashTransactionType, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
-from app.services.sales import repay_client_debt
+from app.services.sales import cancel_client_payment, payment_can_be_cancelled, repay_client_debt
 from app.services.timezone import get_app_timezone, to_db_datetime
 
 
@@ -51,6 +51,11 @@ class ClientPaymentHistoryResponse(BaseModel):
     amount: str
     payment_method: str
     description: str
+    can_cancel: bool = False
+
+
+class PaymentCancelRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class ClientHistoryResponse(BaseModel):
@@ -299,6 +304,7 @@ async def client_history(
             amount=str(payment.amount),
             payment_method=display_label(payment.payment_method.value),
             description=display_label(payment.description or ""),
+            can_cancel=payment_can_be_cancelled(payment),
         ) for payment in payments],
         sales_total=str(sales_total or 0),
         paid_total=str(paid_total or 0),
@@ -440,11 +446,36 @@ async def write_off_sale_debt(
     return {"sale_id": sale.id, "written_off": True, "amount": str(amount)}
 
 
+@router.post("/payments/{payment_id}/cancel")
+async def cancel_payment(
+    payment_id: int,
+    request: PaymentCancelRequest,
+    user: User = Depends(require_roles("ADMIN")),
+    session: AsyncSession = session_dependency,
+) -> dict[str, object]:
+    """Cancel a mistaken debt repayment (for example a double click on "Принять оплату")."""
+    try:
+        result = await cancel_client_payment(session, payment_id, request.reason, actor_id=user.id)
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {
+        "payment_id": result["payment_id"],
+        "client_id": result["client_id"],
+        "amount": str(result["amount"]),
+        "sales_debt": str(result["sales_debt"]),
+        "returned_to_sales": [
+            {"sale_id": item["sale_id"], "amount": str(item["amount"])} for item in result["returned_to_sales"]
+        ],
+    }
+
+
 @router.post("/{client_id}/payments", response_model=ClientPaymentResponse)
 async def repay_client(
     client_id: int,
     request: ClientPaymentCreateRequest,
-    _: User = Depends(require_section("clients")),
+    user: User = Depends(require_section("clients")),
     session: AsyncSession = session_dependency,
 ) -> ClientPaymentResponse:
     result = await repay_client_debt(
@@ -453,6 +484,7 @@ async def repay_client(
         request.amount,
         request.payment_method,
         request.description,
+        actor_id=user.id,
     )
     await session.commit()
     return ClientPaymentResponse(

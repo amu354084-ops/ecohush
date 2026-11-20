@@ -3,10 +3,14 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+import json
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schema import (
+    AuditEvent,
     CashTransaction,
     CashTransactionType,
     Counterparty,
@@ -18,6 +22,32 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.inventory import deduct_fifo
+from app.services.timezone import to_db_datetime
+
+PAYMENT_AUDIT_ENTITY = "payment"
+SALE_PAYMENT_DESCRIPTION = "Sale payment"
+DUPLICATE_PAYMENT_WINDOW = timedelta(seconds=60)
+
+
+def _payment_snapshot(transaction: CashTransaction, allocations: list[dict[str, Any]]) -> str:
+    method = transaction.payment_method
+    return json.dumps({
+        "payment_id": transaction.id,
+        "amount": str(transaction.amount),
+        "payment_method": getattr(method, "value", str(method)),
+        "description": transaction.description or "",
+        "created_at": transaction.created_at.isoformat() if transaction.created_at else None,
+        "allocations": [{"sale_id": item["sale_id"], "amount": str(item["amount"])} for item in allocations],
+    }, ensure_ascii=False)
+
+
+def payment_can_be_cancelled(transaction: CashTransaction) -> bool:
+    """Debt repayments can be cancelled; cash taken at checkout belongs to the sale itself."""
+    return (
+        transaction.type == CashTransactionType.INCOME
+        and transaction.counterparty_id is not None
+        and (transaction.description or "") != SALE_PAYMENT_DESCRIPTION
+    )
 
 
 async def checkout_sale(
@@ -176,6 +206,7 @@ async def repay_client_debt(
     amount: Decimal,
     payment_method: PaymentMethod,
     description: str = "",
+    actor_id: int | None = None,
 ) -> dict[str, Any]:
     if amount <= 0:
         raise ValueError("Сумма погашения должна быть больше нуля")
@@ -183,6 +214,23 @@ async def repay_client_debt(
     counterparty = await session.scalar(select(Counterparty).where(Counterparty.id == client_id))
     if counterparty is None:
         raise ValueError("Клиент не найден")
+
+    # Protection against a double click on "Принять оплату": the same amount for the
+    # same client within a minute is almost always an accidental duplicate.
+    recent_since = to_db_datetime(datetime.now(timezone.utc) - DUPLICATE_PAYMENT_WINDOW)
+    duplicate_id = await session.scalar(
+        select(CashTransaction.id).where(
+            CashTransaction.counterparty_id == client_id,
+            CashTransaction.type == CashTransactionType.INCOME,
+            CashTransaction.amount == amount,
+            CashTransaction.created_at >= recent_since,
+        ).limit(1)
+    )
+    if duplicate_id is not None:
+        raise ValueError(
+            f"Такая же оплата ({amount}) от этого клиента уже принята меньше минуты назад (платёж №{duplicate_id}). "
+            "Если это действительно второй платёж, повторите через минуту"
+        )
 
     sales_result = await session.execute(
         select(Sale)
@@ -216,10 +264,108 @@ async def repay_client_debt(
     )
     session.add(transaction)
     await session.flush()
+    # Remember how the payment was spread over sales so it can be cancelled exactly.
+    session.add(AuditEvent(
+        entity_type=PAYMENT_AUDIT_ENTITY, entity_id=transaction.id, counterparty_id=client_id,
+        actor_id=actor_id, action="CREATED", reason=transaction.description or "",
+        after_data=_payment_snapshot(transaction, allocations),
+    ))
+    await session.flush()
     return {
         "payment_id": transaction.id,
         "client_id": client_id,
         "amount": amount,
         "remaining_debt": counterparty.current_debt,
         "allocations": allocations,
+    }
+
+
+async def cancel_client_payment(
+    session: AsyncSession,
+    payment_id: int,
+    reason: str,
+    actor_id: int | None = None,
+) -> dict[str, Any]:
+    """Cancel a mistaken debt repayment.
+
+    The debt returns to the sales the payment had paid off and the cash income is
+    removed.  A full snapshot of the payment is kept in the audit log.
+    """
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("Укажите причину отмены платежа")
+    transaction = await session.get(CashTransaction, payment_id)
+    if transaction is None:
+        raise ValueError("Платёж не найден")
+    if not payment_can_be_cancelled(transaction):
+        raise ValueError("Отменить можно только погашение долга клиента")
+    counterparty = await session.get(Counterparty, transaction.counterparty_id)
+    if counterparty is None:
+        raise ValueError("Клиент не найден")
+
+    amount = Decimal(transaction.amount)
+    created_event = await session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == PAYMENT_AUDIT_ENTITY,
+            AuditEvent.entity_id == transaction.id,
+            AuditEvent.action == "CREATED",
+        ).order_by(AuditEvent.id.desc()).limit(1)
+    )
+    reversals: list[tuple[Sale, Decimal]] = []
+    recorded = json.loads(created_event.after_data or "{}").get("allocations") if created_event else None
+    if recorded:
+        # Exact reversal: the payment remembered which sales it paid.
+        for item in recorded:
+            sale = await session.get(Sale, int(item["sale_id"]), with_for_update=True)
+            share = Decimal(item["amount"])
+            if sale is None or sale.paid_amount < share:
+                raise ValueError(f"Продажа №{item['sale_id']} изменилась, отменить платёж автоматически нельзя")
+            reversals.append((sale, share))
+    else:
+        # Older payments did not store their allocation.  Repayments are applied to the
+        # oldest sale first, so the amount is taken back from the newest sales that
+        # existed at the time of the payment.
+        candidates = (await session.execute(
+            select(Sale)
+            .where(
+                Sale.counterparty_id == counterparty.id,
+                Sale.total_amount > 0,
+                Sale.paid_amount > 0,
+                Sale.created_at <= transaction.created_at,
+            )
+            .order_by(Sale.created_at.desc(), Sale.id.desc())
+            .with_for_update()
+        )).scalars().all()
+        remaining = amount
+        for sale in candidates:
+            if remaining <= 0:
+                break
+            share = min(remaining, Decimal(sale.paid_amount))
+            reversals.append((sale, share))
+            remaining -= share
+        if remaining > 0:
+            raise ValueError("Не удалось найти продажи, на которые был распределён этот платёж")
+
+    before_data = _payment_snapshot(
+        transaction, [{"sale_id": sale.id, "amount": share} for sale, share in reversals]
+    )
+    for sale, share in reversals:
+        sale.paid_amount -= share
+        sale.debt_amount += share
+    counterparty.current_debt = (counterparty.current_debt or Decimal(0)) + amount
+    session.add(AuditEvent(
+        entity_type=PAYMENT_AUDIT_ENTITY, entity_id=transaction.id, counterparty_id=counterparty.id,
+        actor_id=actor_id, action="CANCELLED", reason=reason, before_data=before_data,
+    ))
+    await session.delete(transaction)
+    await session.flush()
+    debt_total = await session.scalar(
+        select(func.coalesce(func.sum(Sale.debt_amount), 0)).where(Sale.counterparty_id == counterparty.id)
+    )
+    return {
+        "payment_id": payment_id,
+        "client_id": counterparty.id,
+        "amount": amount,
+        "sales_debt": Decimal(debt_total or 0),
+        "returned_to_sales": [{"sale_id": sale.id, "amount": share} for sale, share in reversals],
     }

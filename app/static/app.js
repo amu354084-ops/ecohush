@@ -139,7 +139,7 @@ function showView(view) {
   if (view === 'users') loadUsers();
   if (view === 'debts') {
     loadDebts(document.getElementById('debt-search')?.value || '');
-    if (sessionStorage.getItem('erp_role') === 'ADMIN') loadAuditEvents('manual_debt,sale_debt,counterparty', 'debt-audit-table');
+    if (sessionStorage.getItem('erp_role') === 'ADMIN') loadAuditEvents('manual_debt,sale_debt,counterparty,payment', 'debt-audit-table');
     if (sessionStorage.getItem('erp_role') === 'ADMIN') loadManualDebtClients();
   }
 }
@@ -1083,13 +1083,51 @@ async function loadClientHistory(clientId) {
     });
     cell.appendChild(button);
   });
-  renderTable('client-payments-history-table', [
+  const isAdmin = sessionStorage.getItem('erp_role') === 'ADMIN';
+  const paymentColumns = [
     { key: 'id', label: 'Платеж' },
     { key: 'created_at', label: 'Дата' },
     { key: 'amount', label: 'Сумма' },
     { key: 'payment_method', label: 'Способ' },
     { key: 'description', label: 'Комментарий' },
-  ], data.payments || []);
+  ];
+  if (isAdmin) paymentColumns.push({ key: 'actions', label: 'Действие' });
+  const payments = data.payments || [];
+  renderTable('client-payments-history-table', paymentColumns, payments.map((payment) => ({ ...payment, actions: '' })));
+  if (!isAdmin) return;
+  document.querySelectorAll('#client-payments-history-table tr').forEach((row, index) => {
+    if (index === 0) return;
+    const payment = payments[index - 1];
+    const cell = row.cells[row.cells.length - 1];
+    if (!payment || !cell || !payment.can_cancel) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button-second';
+    button.textContent = 'Отменить';
+    button.addEventListener('click', async () => {
+      const reason = prompt(
+        `Отменить платёж №${payment.id} на ${formatMoney(payment.amount)}?\n`
+        + 'Долг клиента увеличится на эту сумму, приход из кассы будет убран.\n'
+        + 'Укажите причину (например: двойное нажатие):',
+      );
+      if (!reason || !reason.trim()) return;
+      button.disabled = true;
+      const result = await fetchJson(`/api/v1/clients/payments/${payment.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (result?.detail) {
+        button.disabled = false;
+        showToast(`Не удалось отменить платёж: ${result.detail}`);
+        return;
+      }
+      showToast(`Платёж №${payment.id} отменён. Долг по продажам клиента: ${formatMoney(result.sales_debt)}`);
+      await loadClientHistory(clientId);
+      await loadClients();
+    });
+    cell.appendChild(button);
+  });
 }
 
 async function loadClients(search = '', page = state.clientsPage) {
@@ -3386,6 +3424,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   bindIfExists('repay-client-debt', async () => {
+    const button = document.getElementById('repay-client-debt');
+    if (button?.disabled) return;
     const clientId = Number(document.getElementById('client-payment-client')?.value || 0);
     const amount = Number(document.getElementById('client-payment-amount')?.value || 0);
     const paymentMethod = document.getElementById('client-payment-method')?.value || 'CASH';
@@ -3394,11 +3434,19 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus('client-payment-status', 'Выберите клиента и укажите сумму оплаты больше нуля.', 'error');
       return;
     }
-    const result = await fetchJson(`/api/v1/clients/${clientId}/payments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, payment_method: paymentMethod, description }),
-    });
+    // Block the button while the request runs so a double click cannot create two payments.
+    const oldText = button ? button.textContent : '';
+    if (button) { button.disabled = true; button.textContent = 'Сохранение...'; }
+    let result;
+    try {
+      result = await fetchJson(`/api/v1/clients/${clientId}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, payment_method: paymentMethod, description }),
+      });
+    } finally {
+      if (button) { button.disabled = false; button.textContent = oldText; }
+    }
     if (result?.detail) {
       setStatus('client-payment-status', `Ошибка: ${result.detail}`, 'error');
       return;
