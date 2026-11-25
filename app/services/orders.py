@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 import re
 from typing import Any
 
@@ -246,10 +246,11 @@ async def accept_order(session: AsyncSession, order_id: int, discount_amount: De
     if order.status != OrderStatus.PENDING:
         raise ValueError("Only pending orders can be accepted")
     if discount_amount < 0:
-        raise ValueError("Discount must be non-negative")
+        raise ValueError("Общая скидка не может быть отрицательной")
     subtotal = sum((item.quantity * item.price - (item.discount or Decimal(0)) for item in order.items), Decimal(0))
+    subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if discount_amount > subtotal:
-        raise ValueError(f"Discount cannot exceed order total: {subtotal}")
+        raise ValueError(f"Общая скидка ({discount_amount}) не может быть больше суммы заказа: {subtotal}")
     order.discount_amount = discount_amount
     order.status = OrderStatus.ACCEPTED
     order.invoice_number = await _next_invoice_number(session)
@@ -306,6 +307,7 @@ async def _complete_delivery(
     subtotal = sum((item.quantity * item.price for item in order.items), Decimal(0))
     item_discounts = sum((item.discount or Decimal(0) for item in order.items), Decimal(0))
     total = max(Decimal(0), subtotal - item_discounts - (order.discount_amount or Decimal(0)))
+    total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if paid_amount > total:
         raise ValueError(f"Оплата не может быть больше суммы заказа: {total}")
     if payment_type == OrderPaymentType.DEBT and paid_amount != 0:
@@ -315,6 +317,7 @@ async def _complete_delivery(
             "item_id": item.item_id,
             "qty": item.quantity,
             "unit_price": item.price,
+            "discount_amount": item.discount or Decimal(0),
             "discount_percent": (
                 ((item.discount or Decimal(0)) / (item.quantity * item.price) * Decimal(100))
                 if item.quantity * item.price else Decimal(0)

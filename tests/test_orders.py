@@ -116,7 +116,7 @@ async def test_order_accept_rejects_discount_above_total():
         await session.flush()
         await create_batch(session, item.id, warehouse.id, Decimal("2"), Decimal("2"), Decimal("10"))
         order = await create_order(session, courier.id, client.id, [{"item_id": item.id, "quantity": 2, "price": 10}])
-        with pytest.raises(ValueError, match="cannot exceed order total"):
+        with pytest.raises(ValueError, match="не может быть больше суммы заказа"):
             await accept_order(session, order.id, Decimal("21"))
 
     await engine.dispose()

@@ -135,7 +135,7 @@ async def test_checkout_sale_rejects_overpayment():
         batch = await create_batch(session, item.id, wh.id, Decimal("2"), Decimal("1"), Decimal("10"))
         await session.commit()
 
-        with pytest.raises(ValueError, match="cannot exceed sale total"):
+        with pytest.raises(ValueError, match="не может быть больше суммы продажи"):
             await checkout_sale(
                 session=session,
                 counterparty_id=None,

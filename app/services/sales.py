@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import json
@@ -109,7 +109,19 @@ async def checkout_sale(
                 (move["qty"] * move["unit_price"] for move in moves),
                 Decimal(0),
             ) / qty
-        discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
+        line_discount = item_data.get("discount_amount") if use_item_prices else None
+        if line_discount is not None:
+            # Order lines store the discount in money; use it as is.  Converting it to a
+            # percent and back produced totals like 350.1399999... and the payment of
+            # 350.14 was then rejected as "bigger than the sale total".
+            line_discount = Decimal(line_discount)
+            if line_discount < 0 or line_discount > unit_price * qty:
+                raise ValueError("Скидка по строке должна быть от нуля до суммы строки")
+            item_total = (unit_price * qty - line_discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            discounted_price = item_total / qty
+        else:
+            discounted_price = unit_price * (Decimal("1") - (discount_percent / Decimal("100")))
+            item_total = (discounted_price * qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         unit_cost = cost / qty if qty != 0 else Decimal(0)
 
         sale_items.append(
@@ -123,7 +135,6 @@ async def checkout_sale(
             )
         )
 
-        item_total = discounted_price * qty
         total_amount += item_total
         batch_details.append(
             {
@@ -140,9 +151,9 @@ async def checkout_sale(
     if total_discount < 0:
         raise ValueError("Discount must be non-negative")
     # Whole-order discount (set when an order is accepted) reduces the amount the client owes.
-    total_amount = max(Decimal(0), total_amount - total_discount)
+    total_amount = max(Decimal(0), total_amount - total_discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if paid_amount > total_amount:
-        raise ValueError(f"Paid amount cannot exceed sale total: {total_amount}")
+        raise ValueError(f"Оплата не может быть больше суммы продажи: {total_amount}")
     debt_amount = max(Decimal(0), total_amount - paid_amount)
     sale = Sale(
         counterparty_id=counterparty_id,
