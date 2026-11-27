@@ -7,15 +7,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
-from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_dependencies import require_section
 from app.db import async_session
-from app.models.schema import Item, PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
+from app.models.schema import PayrollEntry, PayrollPenalty, Sale, SaleItem, OverheadExpense, User
 from app.services.localization import display_label
 from app.services.reports import build_pnl_summary, returned_sale_condition
+from app.services.sale_lines import sale_line_amounts
 from app.services.google_sheets import sync_report_sections
 from app.services.timezone import get_app_timezone, to_db_datetime
 
@@ -49,43 +49,44 @@ async def _products_sold_rows(
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
     stmt = (
-        select(
-            Item.id.label("item_id"),
-            Item.name.label("item_name"),
-            Item.code.label("item_code"),
-            Item.unit.label("unit"),
-            func.sum(SaleItem.qty).label("quantity_sold"),
-            func.count(func.distinct(SaleItem.sale_id)).label("sales_count"),
-            func.sum(SaleItem.qty * SaleItem.unit_price).label("gross_sales"),
-            func.sum(SaleItem.qty * SaleItem.unit_price * SaleItem.discount_percent / 100).label("discount_amount"),
-        )
-        .join(SaleItem, SaleItem.item_id == Item.id)
-        .join(Sale, Sale.id == SaleItem.sale_id)
+        select(Sale)
+        .options(selectinload(Sale.sale_items).selectinload(SaleItem.item))
         .where(~returned_sale_condition())
-        .group_by(Item.id, Item.name, Item.code, Item.unit)
     )
     if date_from:
         stmt = stmt.where(Sale.created_at >= _period_datetime(date_from, time.min))
     if date_to:
         stmt = stmt.where(Sale.created_at <= _period_datetime(date_to, time.max))
 
+    totals: dict[int, dict[str, Any]] = {}
+    for sale in (await session.execute(stmt)).scalars().all():
+        # The general order discount is split over the products, so "total_sales"
+        # adds up to the real revenue of the period.
+        for part in sale_line_amounts(sale):
+            line = part.line
+            row = totals.setdefault(line.item_id, {
+                "item_id": line.item_id,
+                "item_name": line.item.name if line.item else "",
+                "item_code": line.item.code if line.item else "",
+                "unit": line.item.unit if line.item else "",
+                "quantity_sold": Decimal(0),
+                "sale_ids": set(),
+                "gross_sales": Decimal(0),
+                "discount_amount": Decimal(0),
+                "general_discount": Decimal(0),
+                "total_sales": Decimal(0),
+            })
+            row["quantity_sold"] += Decimal(line.qty)
+            row["sale_ids"].add(sale.id)
+            row["gross_sales"] += part.gross
+            row["discount_amount"] += part.total_discount
+            row["general_discount"] += part.general_discount
+            row["total_sales"] += part.net
+
     rows = []
-    for row in (await session.execute(stmt)).all():
-        quantity = Decimal(str(row.quantity_sold or 0))
-        gross_sales = Decimal(str(row.gross_sales or 0))
-        discount_amount = Decimal(str(row.discount_amount or 0))
-        net_sales = (gross_sales - discount_amount).quantize(Decimal("0.01"))
-        rows.append({
-            "item_id": row.item_id,
-            "item_name": row.item_name,
-            "item_code": row.item_code,
-            "unit": row.unit,
-            "quantity_sold": quantity,
-            "sales_count": int(row.sales_count or 0),
-            "gross_sales": gross_sales.quantize(Decimal("0.01")),
-            "discount_amount": discount_amount.quantize(Decimal("0.01")),
-            "total_sales": net_sales,
-        })
+    for row in totals.values():
+        row["sales_count"] = len(row.pop("sale_ids"))
+        rows.append(row)
     return sorted(rows, key=lambda item: (-item["total_sales"], item["item_name"], item["item_id"]))
 
 
@@ -95,6 +96,7 @@ def _products_sold_total(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "quantity_sold": sum((row["quantity_sold"] for row in rows), Decimal("0")),
         "gross_sales": sum((row["gross_sales"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
         "discount_amount": sum((row["discount_amount"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
+        "general_discount": sum((row["general_discount"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
         "total_sales": sum((row["total_sales"] for row in rows), Decimal("0")).quantize(Decimal("0.01")),
     }
 
@@ -114,7 +116,8 @@ async def build_report_sections(
     if date_to:
         sales_stmt = sales_stmt.where(Sale.created_at <= _period_datetime(date_to, time.max))
     result = await session.execute(sales_stmt)
-    for sale in result.scalars().all():
+    loaded_sales = result.scalars().all()
+    for sale in loaded_sales:
         sales_rows.append({
             "Продажа №": sale.id,
             "Клиент": sale.counterparty.name if sale.counterparty else "Розничный клиент",
@@ -130,26 +133,23 @@ async def build_report_sections(
             "Дата и время": sale.created_at,
         })
 
-    sale_ids = [row["Продажа №"] for row in sales_rows]
-    sale_items_stmt = (
-        select(SaleItem).options(selectinload(SaleItem.item)).where(SaleItem.sale_id.in_(sale_ids))
-        if sale_ids
-        else select(SaleItem).where(SaleItem.id < 0)
-    )
-    result = await session.execute(sale_items_stmt)
-    sale_items_rows = [
-        {
-            "Продажа №": item.sale_id,
-            "Товар №": item.item_id,
-            "Товар": item.item.name if item.item else "",
-            "Количество": float(item.qty),
-            "Цена": float(item.unit_price),
-            "Себестоимость": float(item.cost_price),
-            "Скидка сумма": float(item.qty * item.unit_price * (item.discount_percent or 0) / 100),
-            "Скидка %": float(item.discount_percent or 0),
-        }
-        for item in result.scalars().all()
-    ]
+    sale_items_rows = []
+    for sale in loaded_sales:
+        for part in sale_line_amounts(sale):
+            item = part.line
+            sale_items_rows.append({
+                "Продажа №": sale.id,
+                "Товар №": item.item_id,
+                "Товар": item.item.name if item.item else "",
+                "Количество": float(item.qty),
+                "Цена": float(item.unit_price),
+                "Себестоимость": float(item.cost_price),
+                "Сумма без скидки": float(part.gross),
+                "Скидка сумма": float(part.line_discount),
+                "Скидка %": float(item.discount_percent or 0),
+                "Доля общей скидки": float(part.general_discount),
+                "Итого по товару": float(part.net),
+            })
 
     overheads_stmt = select(OverheadExpense)
     if date_from:
@@ -262,6 +262,7 @@ async def products_sold_report(
             "quantity_sold": str(row["quantity_sold"]),
             "gross_sales": str(row["gross_sales"]),
             "discount_amount": str(row["discount_amount"]),
+            "general_discount": str(row["general_discount"]),
             "total_sales": str(row["total_sales"]),
         }
         for row in rows

@@ -1428,6 +1428,7 @@ async function loadReports() {
     { key: 'sales_count', label: 'Продаж' },
     { key: 'gross_sales', label: 'До скидки' },
     { key: 'discount_amount', label: 'Скидка' },
+    { key: 'general_discount', label: 'в т.ч. общая скидка' },
     { key: 'total_sales', label: 'Сумма продажи' },
   ], [...productRows, { item_name: 'ИТОГО за период', total_sales: productTotal.toFixed(2) }]);
 }
@@ -2387,6 +2388,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const debtSearch = document.getElementById('debt-search');
   debtSearch?.addEventListener('input', () => loadDebts(debtSearch.value));
   document.getElementById('debt-as-of')?.addEventListener('change', () => loadDebts(debtSearch?.value || ''));
+  bindIfExists('export-debtors', async () => {
+    const button = document.getElementById('export-debtors');
+    const status = document.getElementById('export-debtors-status');
+    if (button?.disabled) return;
+    const params = new URLSearchParams();
+    const asOf = document.getElementById('debt-as-of')?.value || '';
+    const query = (debtSearch?.value || '').trim();
+    if (asOf) params.set('as_of', asOf);
+    if (query) params.set('q', query);
+    const oldText = button ? button.textContent : '';
+    if (button) { button.disabled = true; button.textContent = 'Формирование файла...'; }
+    try {
+      const response = await authenticatedFetch(`/api/v1/clients/debts/export?${params.toString()}`);
+      if (!response.ok) throw new Error((await safeJson(response)).detail || response.statusText);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Должники_${asOf || new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      if (status) { status.hidden = true; }
+    } catch (error) {
+      if (status) { status.hidden = false; status.textContent = `Не удалось скачать файл: ${error.message}`; }
+    } finally {
+      if (button) { button.disabled = false; button.textContent = oldText; }
+    }
+  });
   bindIfExists('add-manual-debt', async () => {
     const clientId = Number(document.getElementById('manual-debt-client')?.value || 0);
     const amount = Number(document.getElementById('manual-debt-amount')?.value || 0);

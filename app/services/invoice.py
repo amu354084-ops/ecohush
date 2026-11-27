@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 
+from app.services.sale_lines import order_line_amounts, sale_line_amounts
+
 ONES = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
 TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"]
 TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"]
@@ -71,57 +73,48 @@ def _format_quantity(value: Decimal) -> str:
     return f"{whole}.{(fraction + '00')[:max(2, len(fraction))]}"
 
 
+def _general_discount_note(amounts) -> str:
+    general = sum((part.general_discount for part in amounts), Decimal(0))
+    if general <= 0:
+        return ""
+    return (
+        f"<p>В том числе общая скидка на заказ: {general:.2f} сомони "
+        "(распределена по товарам пропорционально их сумме).</p>"
+    )
+
+
 def invoice_html(order, company_name: str = "ECO KHUSH") -> str:
     months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
     created = order.created_at
     date_text = f"{created.day:02d} {months[created.month - 1]} {created.year} г. {created:%H:%M}"
     rows = []
-    subtotal = Decimal(0)
-    discount_total = Decimal(0)
-    order_discount = order.discount_amount or Decimal(0)
-    total_subtotal = sum((item.quantity * item.price for item in order.items), Decimal(0))
-    for index, line in enumerate(order.items, 1):
-        line_subtotal = line.quantity * line.price
-        line_discount = (line.discount or Decimal(0))
-        if order_discount and total_subtotal:
-            line_discount += (order_discount * line_subtotal / total_subtotal).quantize(Decimal("0.01"))
-        line_total = line_subtotal - line_discount
-        subtotal += line_subtotal
-        discount_total += line_discount
-        rows.append(f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{_format_quantity(line.quantity)} {escape(line.item.unit)}</td><td>{line.price:.2f}</td><td>{line_subtotal:.2f}</td><td>{line_discount:.2f}</td><td>{line_total:.2f}</td></tr>")
-    total = subtotal - discount_total
+    amounts = order_line_amounts(order)
+    for index, part in enumerate(amounts, 1):
+        line = part.line
+        rows.append(f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{_format_quantity(line.quantity)} {escape(line.item.unit)}</td><td>{line.price:.2f}</td><td>{part.gross:.2f}</td><td>{part.total_discount:.2f}</td><td>{part.net:.2f}</td></tr>")
+    subtotal = sum((part.gross for part in amounts), Decimal(0))
+    discount_total = sum((part.total_discount for part in amounts), Decimal(0))
+    total = sum((part.net for part in amounts), Decimal(0))
+    general_note = _general_discount_note(amounts)
     return f"""<!doctype html><html lang='ru'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Заказ клиента №{escape(order.invoice_number or str(order.id))}</title><style>
 *{{box-sizing:border-box}}body{{margin:0;background:#eef1f4;color:#17212b;font:12px/1.35 Arial,sans-serif}}.invoice{{max-width:900px;margin:14px auto;padding:20px;background:#fff;box-shadow:0 8px 25px #17212b1a}}.toolbar{{display:flex;justify-content:flex-end;margin-bottom:10px}}button{{border:0;border-radius:7px;background:#1769aa;color:white;padding:8px 12px;font-weight:700;cursor:pointer}}h1{{font-size:16px;line-height:1.25;margin:0 0 12px;border-bottom:1px solid #17212b;padding-bottom:6px}}.meta{{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-bottom:12px;font-size:10px}}.meta b{{display:inline-block;min-width:90px}}table{{width:100%;border-collapse:collapse;font-size:10px}}th,td{{border:1px solid #9ba7b2;padding:4px 3px;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}th{{background:#e9eef2;font-size:9px}}.totals{{margin:8px 0 4px;display:flex;justify-content:flex-end}}.totals table{{width:360px}}.words{{margin-top:6px;font-size:10px}}.signatures{{display:flex;justify-content:space-between;margin-top:22px;font-size:10px}}@media(max-width:700px){{.invoice{{margin:0;padding:12px;box-shadow:none}}.meta{{grid-template-columns:1fr}}table{{font-size:9px}}th,td{{padding:3px 2px}}.signatures{{gap:12px;font-size:9px}}}}@media print{{body{{background:#fff;font-size:10px}}.invoice{{margin:0;max-width:none;padding:0;box-shadow:none;page-break-inside:avoid;break-inside:avoid-page}}h1{{font-size:14px;margin-bottom:8px}}.meta{{margin-bottom:8px}}.signatures{{margin-top:14px}}.toolbar{{display:none}}@page{{size:A4;margin:8mm}}}}
-</style></head><body><main class='invoice'><div class='toolbar'><button onclick='window.print()' aria-label='Печать'>🖨 Печать / Скачать PDF</button></div><h1>Заказ клиента №{escape(order.invoice_number or str(order.id))} от {date_text}</h1><div class='meta'><div><b>Исполнитель:</b> {escape(company_name)}</div><div><b>Заказчик:</b> {escape(order.client.name if order.client else "")}</div><div><b>Курьер:</b> {escape(order.courier.full_name if order.courier and order.courier.full_name else order.courier.username if order.courier else "")}</div><div><b>Статус:</b> {escape(str(order.status))}</div></div><table><thead><tr><th>№</th><th>Товары</th><th>Кол-во</th><th>Цена</th><th>Сумма без скидки</th><th>Скидка</th><th>Сумма</th></tr></thead><tbody>{''.join(rows)}</tbody><tfoot><tr><th colspan='4'>Итого:</th><th>{subtotal:.2f}</th><th>{discount_total:.2f}</th><th>{total:.2f}</th></tr></tfoot></table><p>Всего наименований {len(order.items)}, на сумму {total:.2f} сомони.</p><p class='words'><b>Сумма прописью:</b> {amount_in_words(total)}</p><div class='signatures'><span>Исполнитель __________________</span><span>Заказчик __________________</span></div></main></body></html>"""
+</style></head><body><main class='invoice'><div class='toolbar'><button onclick='window.print()' aria-label='Печать'>🖨 Печать / Скачать PDF</button></div><h1>Заказ клиента №{escape(order.invoice_number or str(order.id))} от {date_text}</h1><div class='meta'><div><b>Исполнитель:</b> {escape(company_name)}</div><div><b>Заказчик:</b> {escape(order.client.name if order.client else "")}</div><div><b>Курьер:</b> {escape(order.courier.full_name if order.courier and order.courier.full_name else order.courier.username if order.courier else "")}</div><div><b>Статус:</b> {escape(str(order.status))}</div></div><table><thead><tr><th>№</th><th>Товары</th><th>Кол-во</th><th>Цена</th><th>Сумма без скидки</th><th>Скидка</th><th>Сумма</th></tr></thead><tbody>{''.join(rows)}</tbody><tfoot><tr><th colspan='4'>Итого:</th><th>{subtotal:.2f}</th><th>{discount_total:.2f}</th><th>{total:.2f}</th></tr></tfoot></table>{general_note}<p>Всего наименований {len(order.items)}, на сумму {total:.2f} сомони.</p><p class='words'><b>Сумма прописью:</b> {amount_in_words(total)}</p><div class='signatures'><span>Исполнитель __________________</span><span>Заказчик __________________</span></div></main></body></html>"""
 
 
 def sale_invoice_html(sale, company_name: str = "ECO KHUSH") -> str:
     created = sale.created_at
     rows = []
-    subtotal = Decimal(0)
-    discount_total = Decimal(0)
-    for index, line in enumerate(sale.sale_items, 1):
-        line_subtotal = line.qty * line.unit_price
-        line_discount = line_subtotal * (line.discount_percent or Decimal(0)) / Decimal(100)
-        line_total = line_subtotal - line_discount
-        subtotal += line_subtotal
-        discount_total += line_discount
+    amounts = sale_line_amounts(sale)
+    for index, part in enumerate(amounts, 1):
+        line = part.line
         rows.append(
             f"<tr><td>{index}</td><td>{escape(line.item.name)}</td><td>{_format_quantity(line.qty)} {escape(line.item.unit)}</td>"
-            f"<td>{line.unit_price:.2f}</td><td>{line_subtotal:.2f}</td><td>{line_discount:.2f}</td><td>{line_total:.2f}</td></tr>"
+            f"<td>{line.unit_price:.2f}</td><td>{part.gross:.2f}</td><td>{part.total_discount:.2f}</td><td>{part.net:.2f}</td></tr>"
         )
-    total = subtotal - discount_total
-    # Whole-order discount (given when the order was accepted) is part of the sale total
-    # but not of the lines, so it is shown as a separate row.
-    sale_total = Decimal(sale.total_amount or 0)
-    general_discount = (total - sale_total).quantize(Decimal("0.01")) if sale_total > 0 else Decimal(0)
-    general_row = ""
-    if general_discount > 0:
-        general_row = (
-            f"<tr><th colspan='6'>Общая скидка на заказ:</th><th>{general_discount:.2f}</th></tr>"
-            f"<tr><th colspan='6'>К оплате:</th><th>{sale_total:.2f}</th></tr>"
-        )
-        total = sale_total
+    subtotal = sum((part.gross for part in amounts), Decimal(0))
+    discount_total = sum((part.total_discount for part in amounts), Decimal(0))
+    total = sum((part.net for part in amounts), Decimal(0))
+    general_note = _general_discount_note(amounts)
     client_name = sale.counterparty.name if sale.counterparty else "Розничный клиент"
     payment_method = getattr(sale.payment_method, "value", sale.payment_method) or "Не указано"
-    return f"""<!doctype html><html lang='ru'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Продажа №{sale.id}</title><style>body{{margin:0;background:#eef1f4;color:#17212b;font:14px Arial,sans-serif}}.invoice{{max-width:1000px;margin:24px auto;padding:34px;background:#fff}}.toolbar{{text-align:right;margin-bottom:20px}}button{{background:#1769aa;color:#fff;border:0;padding:10px 16px;font-weight:700}}h1{{border-bottom:2px solid #17212b;padding-bottom:12px}}.meta{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:22px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #9ba7b2;padding:8px;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}th{{background:#e9eef2}}@media print{{.toolbar{{display:none}}body{{background:#fff}}.invoice{{margin:0}}}}</style></head><body><main class='invoice'><div class='toolbar'><button onclick='window.print()'>Печать / Скачать PDF</button></div><h1>Продажа №{sale.id} от {created:%d.%m.%Y %H:%M}</h1><div class='meta'><div><b>Клиент:</b> {escape(client_name)}</div><div><b>Телефон:</b> {escape(sale.counterparty.phone if sale.counterparty else '')}</div><div><b>Способ оплаты:</b> {escape(str(payment_method))}</div><div><b>Статус:</b> Оформлена</div></div><table><thead><tr><th>№</th><th>Товар</th><th>Количество</th><th>Цена</th><th>Без скидки</th><th>Скидка</th><th>Итого</th></tr></thead><tbody>{''.join(rows)}</tbody><tfoot><tr><th colspan='4'>Общий счёт:</th><th>{subtotal:.2f}</th><th>{discount_total:.2f}</th><th>{subtotal - discount_total:.2f}</th></tr>{general_row}</tfoot></table><p>Оплачено: {sale.paid_amount:.2f} сомони. Долг: {sale.debt_amount:.2f} сомони.</p><p><b>Сумма прописью:</b> {amount_in_words(total)}</p></main></body></html>"""
+    return f"""<!doctype html><html lang='ru'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Продажа №{sale.id}</title><style>body{{margin:0;background:#eef1f4;color:#17212b;font:14px Arial,sans-serif}}.invoice{{max-width:1000px;margin:24px auto;padding:34px;background:#fff}}.toolbar{{text-align:right;margin-bottom:20px}}button{{background:#1769aa;color:#fff;border:0;padding:10px 16px;font-weight:700}}h1{{border-bottom:2px solid #17212b;padding-bottom:12px}}.meta{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:22px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #9ba7b2;padding:8px;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}th{{background:#e9eef2}}@media print{{.toolbar{{display:none}}body{{background:#fff}}.invoice{{margin:0}}}}</style></head><body><main class='invoice'><div class='toolbar'><button onclick='window.print()'>Печать / Скачать PDF</button></div><h1>Продажа №{sale.id} от {created:%d.%m.%Y %H:%M}</h1><div class='meta'><div><b>Клиент:</b> {escape(client_name)}</div><div><b>Телефон:</b> {escape(sale.counterparty.phone if sale.counterparty else '')}</div><div><b>Способ оплаты:</b> {escape(str(payment_method))}</div><div><b>Статус:</b> Оформлена</div></div><table><thead><tr><th>№</th><th>Товар</th><th>Количество</th><th>Цена</th><th>Без скидки</th><th>Скидка</th><th>Итого</th></tr></thead><tbody>{''.join(rows)}</tbody><tfoot><tr><th colspan='4'>Общий счёт:</th><th>{subtotal:.2f}</th><th>{discount_total:.2f}</th><th>{total:.2f}</th></tr></tfoot></table>{general_note}<p>Оплачено: {sale.paid_amount:.2f} сомони. Долг: {sale.debt_amount:.2f} сомони.</p><p><b>Сумма прописью:</b> {amount_in_words(total)}</p></main></body></html>"""

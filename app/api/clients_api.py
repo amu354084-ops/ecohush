@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date
 from decimal import Decimal
 import json
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.auth_dependencies import require_roles, require_section, user_permissions
 from app.db import async_session
 from app.models.schema import User
-from app.models.schema import AuditEvent, CashTransaction, CashTransactionType, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
+from app.models.schema import AuditEvent, CashTransaction, Counterparty, Item, ManualDebt, PaymentMethod, Sale, SaleItem
 from app.services.localization import display_label
+from app.services.debtors import build_debtors_workbook, client_debt_select, signed_cash_amount
 from app.services.sales import cancel_client_payment, payment_can_be_cancelled, repay_client_debt
-from app.services.timezone import get_app_timezone, to_db_datetime
 
 
 class ClientCreateRequest(BaseModel):
@@ -159,10 +161,19 @@ async def list_audit_events(
     ]
 
 
-def _signed_cash_amount():
-    return case(
-        (CashTransaction.type == CashTransactionType.EXPENSE, -CashTransaction.amount),
-        else_=CashTransaction.amount,
+@router.get("/debts/export")
+async def export_debtors(
+    as_of: date | None = None,
+    q: str | None = None,
+    _: User = Depends(require_section("debts")),
+    session: AsyncSession = session_dependency,
+) -> Response:
+    """Excel file of the "Должники" tab (same amounts as on screen)."""
+    data, filename = await build_debtors_workbook(session, as_of=as_of, q=q)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
@@ -175,43 +186,7 @@ async def list_clients(
     _: User = Depends(require_section("clients")),
     session: AsyncSession = session_dependency,
 ) -> list[ClientResponse]:
-    if as_of:
-        end_of_day = to_db_datetime(datetime.combine(as_of, time.max, tzinfo=get_app_timezone()))
-        sales_total = select(func.coalesce(func.sum(Sale.total_amount), 0)).where(
-            Sale.counterparty_id == Counterparty.id,
-            Sale.created_at <= end_of_day,
-        ).scalar_subquery()
-        # Refunds (EXPENSE) reduce what the client has paid; previously they were counted as payments.
-        paid_total = select(func.coalesce(func.sum(_signed_cash_amount()), 0)).where(
-            CashTransaction.counterparty_id == Counterparty.id,
-            CashTransaction.created_at <= end_of_day,
-        ).scalar_subquery()
-        manual_debt_total = select(func.coalesce(func.sum(ManualDebt.amount), 0)).where(
-            ManualDebt.counterparty_id == Counterparty.id,
-            ManualDebt.created_at <= end_of_day,
-        ).scalar_subquery()
-        debt_total = sales_total - paid_total + manual_debt_total
-    else:
-        sales_debt_total = (
-            select(func.coalesce(func.sum(Sale.debt_amount), 0))
-            .where(Sale.counterparty_id == Counterparty.id)
-            .scalar_subquery()
-        )
-        manual_debt_total = (
-            select(func.coalesce(func.sum(ManualDebt.amount), 0))
-            .where(ManualDebt.counterparty_id == Counterparty.id)
-            .scalar_subquery()
-        )
-        debt_total = sales_debt_total + manual_debt_total
-    archived = exists().where(
-        AuditEvent.counterparty_id == Counterparty.id,
-        AuditEvent.entity_type == "counterparty",
-        AuditEvent.action == "ARCHIVED",
-    )
-    stmt = select(Counterparty, debt_total.label("debt_total")).where(~archived).order_by(Counterparty.name, Counterparty.id)
-    if q and q.strip():
-        search = f"%{q.strip()}%"
-        stmt = stmt.where(or_(Counterparty.name.ilike(search), Counterparty.phone.ilike(search)))
+    stmt = client_debt_select(as_of, q)
     result = await session.execute(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))
     clients = result.all()
     return [
@@ -275,7 +250,7 @@ async def client_history(
         select(func.coalesce(func.sum(Sale.total_amount), 0)).where(Sale.counterparty_id == client_id)
     )
     paid_total = await session.scalar(
-        select(func.coalesce(func.sum(_signed_cash_amount()), 0)).where(CashTransaction.counterparty_id == client_id)
+        select(func.coalesce(func.sum(signed_cash_amount()), 0)).where(CashTransaction.counterparty_id == client_id)
     )
     calculated_debt = await session.scalar(
         select(func.coalesce(func.sum(Sale.debt_amount), 0)).where(Sale.counterparty_id == client_id)

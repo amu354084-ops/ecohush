@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
@@ -22,6 +23,7 @@ from app.models.schema import (
     WarehouseType,
 )
 from app.services.reports import build_pnl_summary, returned_sale_condition
+from app.services.sale_lines import sale_line_amounts
 from app.services.timezone import get_app_timezone, to_db_datetime
 
 
@@ -118,22 +120,29 @@ async def build_dashboard_summary(
         select(func.coalesce(func.sum(Sale.total_amount), 0), func.count(Sale.id))
         .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
     )).one()
-    monthly_products = (await session.execute(
-        select(
-            Item.id.label("item_id"), Item.name.label("item_name"), Item.unit.label("unit"),
-            func.sum(SaleItem.qty).label("quantity"),
-            func.sum(
-                SaleItem.qty * SaleItem.unit_price
-                * (Decimal("1") - SaleItem.discount_percent / Decimal("100"))
-            ).label("net_amount"),
-        )
-        .join(SaleItem, SaleItem.item_id == Item.id)
-        .join(Sale, Sale.id == SaleItem.sale_id)
+    month_sales = (await session.execute(
+        select(Sale)
+        .options(selectinload(Sale.sale_items).selectinload(SaleItem.item))
         .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
         .where(~returned_sale_condition())
-        .group_by(Item.id, Item.name, Item.unit)
-        .order_by(func.sum(SaleItem.qty * SaleItem.unit_price).desc(), Item.name)
-    )).all()
+    )).scalars().all()
+    products_by_id: dict[int, SimpleNamespace] = {}
+    for month_sale in month_sales:
+        # Product amounts include each product's share of the general order discount.
+        for part in sale_line_amounts(month_sale):
+            line = part.line
+            product = products_by_id.setdefault(line.item_id, SimpleNamespace(
+                item_id=line.item_id,
+                item_name=line.item.name if line.item else "",
+                unit=line.item.unit if line.item else "",
+                quantity=Decimal(0),
+                gross=Decimal(0),
+                net_amount=Decimal(0),
+            ))
+            product.quantity += Decimal(line.qty)
+            product.gross += part.gross
+            product.net_amount += part.net
+    monthly_products = sorted(products_by_id.values(), key=lambda row: (-row.gross, row.item_name))
     monthly_daily = (await session.execute(
         select(Sale.created_at, Sale.total_amount)
         .where(Sale.created_at >= month_start_dt, Sale.created_at < next_month_dt)
